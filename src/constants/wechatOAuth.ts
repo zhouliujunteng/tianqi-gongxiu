@@ -1,7 +1,6 @@
 /**
- * 微信开放平台「网站应用」扫码登录授权页模板（与 .env 示例一致）。
- * 当未设置 VITE_ZION_WECHAT_OAUTH_URL 时使用，保证登录按钮仍可显示；
- * 将 appid 换为真实值并写入 .env（或部署平台环境变量）后重新构建，授权才会成功。
+ * 未设置 VITE_ZION_WECHAT_OAUTH_URL 时的兜底：须为公众号 AppID（oauth2/authorize），勿用开放平台 AppID。
+ * 天启无书：与 .env 一致；其它项目请改此处或在环境变量中覆盖整段 URL。
  */
 export const FALLBACK_WECHAT_OAUTH_URL_TEMPLATE =
-  'https://open.weixin.qq.com/connect/qrconnect?appid=wxYOUR_OPEN_PLATFORM_APPID&redirect_uri={REDIRECT}&response_type=code&scope=snsapi_login#wechat_redirect';
+  'https://open.weixin.qq.com/connect/oauth2/authorize?appid=wx6e046fecc7bfb0d5&redirect_uri={REDIRECT}&response_type=code&scope=snsapi_userinfo#wechat_redirect';

@@ -42,24 +42,10 @@ export interface BrandLogoQueryData {
   ud_quanjuwendang_d0da48: BrandLogoRow[];
 }
 
-export interface UserProfileRow {
-  id: string | number;
-  identity: string | null;
-  name: string | null;
-  /** 用户库「联系方式 / 手机」 */
-  ud_phone_one_dbcfc6: string | null;
+export interface WenjuanPayEligibilityData {
+  fz_payment_record: { id: string | number; status: string | null }[];
 }
 
-export interface UserProfileByAccountData {
-  ud_yonghuxinxi_89e7ab: UserProfileRow[];
-}
-
-export interface Lead2026YinliuListRow {
-  id: string | number;
-  created_at: string;
-  ud_shoujineirong_3bc0b9: Record<string, unknown> | null;
-}
-
-export interface ListLeads2026YinliuData {
-  ud_wenjuanshouji_2026yinliu_cb3e5d: Lead2026YinliuListRow[];
+export interface MyLead2026ExistsData {
+  ud_wenjuanshouji_2026yinliu_cb3e5d: { id: string | number }[];
 }

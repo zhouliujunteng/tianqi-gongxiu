@@ -9,6 +9,16 @@
   body {
     @apply bg-background text-foreground font-sans min-h-screen;
   }
+  /* 有机主题：标题统一 Fraunces 可变光学字号 */
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    @apply font-display;
+    font-optical-sizing: auto;
+  }
 }
 
 .texture-overlay {

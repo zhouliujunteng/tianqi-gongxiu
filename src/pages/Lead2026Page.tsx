@@ -1,82 +1,47 @@
 import { useMutation, useQuery } from '@apollo/client';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import {
-  clearDevMockAccountId,
-  DEFAULT_DEV_MOCK_ACCOUNT_ID,
-  devInviterYonghukuIdWhenProfileMissing,
-  devStaffIdentityWhenProfileMissing,
-  getDevMockAccountId,
-  setDevMockAccountId,
-} from '../auth/devMockAccount';
-import {
-  appendWechatOAuthStateForInviter,
   captureInviterRefFromUrl,
   clearInviterYonghukuId,
   getInviterYonghukuId,
 } from '../auth/inviterRef';
 import {
-  clearZionJwt,
-  getSkipLoginGate,
-  getZionJwt,
-  setSkipLoginGate,
-} from '../auth/zionJwt';
+  buildWechatOAuthRedirectUrl,
+  buildWechatOAuthUrlForWeixinBrowser,
+} from '../auth/wechatLoginUrl';
+import { clearZionJwt, getZionJwt, getZionJwtUserId } from '../auth/zionJwt';
 import { BrandLogoMark } from '../components/BrandLogoMark';
+import { WenjuanWechatPayCard } from '../components/WenjuanWechatPayCard';
 import { BRAND_LOGO_GLOBAL_DOC_TYPE } from '../constants/brand';
-import { FALLBACK_WECHAT_OAUTH_URL_TEMPLATE } from '../constants/wechatOAuth';
+import {
+  isWenjuanPayManualClientConfirmAllowed,
+  isWenjuanPayRequiredForSubmit,
+  isWenjuanWechatPayEnabled,
+  WENJUAN_PAY_OK_STORAGE_KEY,
+  WENJUAN_PAY_WEBHOOK_RETRY_WAIT_MS,
+  WENJUAN_PAY_WEBHOOK_WAIT_MS,
+  WENJUAN_WXPAY_H5_PENDING_KEY,
+} from '../constants/wenjuanPayment';
 import { PRIORITY_OPTION_POOL, WENJUAN_TYPE_ROUTINE } from '../constants/lead2026';
-import { isStaffIdentity } from '../constants/staffIdentity';
 import {
   BRAND_LOGO_FROM_GLOBAL_DOC,
   INSERT_LEAD_2026,
   ME_ACCOUNT,
-  USER_PROFILE_BY_ACCOUNT,
+  MY_LEAD_2026_EXISTS,
+  WENJUAN_PAY_ELIGIBILITY,
 } from '../graphql/operations';
-import { AdminLeadHubPage } from './AdminLeadHubPage';
 import type {
   BrandLogoQueryData,
   Lead2026FormValues,
   MeAccountRow,
-  UserProfileByAccountData,
+  MyLead2026ExistsData,
+  WenjuanPayEligibilityData,
 } from '../types/lead2026';
 import { emptyLeadForm } from '../types/lead2026';
 import { friendlyRequestErrorMessage } from '../utils/friendlyRequestError';
+import { isWeixinBrowser } from '../payment/weixinBrowser';
 
 type Screen = 'form' | 'thanks';
-
-/**
- * 邀请参数三路并行（与微信登录可同时使用）：
- * 1) OAuth state：微信会把 state 原样带回 ?code&state=，不依赖备案 redirect 是否允许 query（见 appendWechatOAuthStateForInviter）。
- * 2) redirect_uri 带当前 search：回跳后地址栏仍有 ?ref=，便于再 capture。
- * 3) 进入页面后已写入 sessionStorage / localStorage。
- *
- * 若 VITE_ZION_WECHAT_OAUTH_URL 里已有 state=（Zion 自带），不会覆盖 state，此时靠 2)+3)。
- */
-function buildWechatLoginUrl(): string {
-  const base =
-    import.meta.env.VITE_ZION_WECHAT_OAUTH_URL?.trim() ||
-    FALLBACK_WECHAT_OAUTH_URL_TEMPLATE;
-  const pathAndQuery = `${window.location.pathname}${window.location.search}`;
-  const back = encodeURIComponent(
-    `${window.location.origin}${pathAndQuery}`
-  );
-
-  const refFromQs = new URLSearchParams(window.location.search)
-    .get('ref')
-    ?.trim();
-  const inviterRef =
-    refFromQs && /^\d+$/.test(refFromQs)
-      ? refFromQs
-      : getInviterYonghukuId();
-
-  let url: string;
-  if (base.includes('{REDIRECT}')) {
-    url = base.replace(/\{REDIRECT\}/g, back);
-  } else {
-    const sep = base.includes('?') ? '&' : '?';
-    url = `${base}${sep}redirect_uri=${back}`;
-  }
-  return appendWechatOAuthStateForInviter(url, inviterRef);
-}
 
 function toShoujiNeirong(v: Lead2026FormValues): Record<string, unknown> {
   return {
@@ -93,6 +58,35 @@ function toShoujiNeirong(v: Lead2026FormValues): Record<string, unknown> {
   };
 }
 
+function isZionPaymentSuccessful(status: string | null | undefined): boolean {
+  return String(status ?? '').toUpperCase() === 'SUCCESSFUL';
+}
+
+function SubtleAccountFooter({ accountId }: { accountId: string }) {
+  return (
+    <footer className="mt-16 w-full pb-10 pt-2">
+      <p className="sr-only">当前帐户编号</p>
+      <p
+        className="text-center font-mono text-[10px] leading-tight text-muted-foreground/30"
+        translate="no"
+      >
+        {accountId}
+      </p>
+    </footer>
+  );
+}
+
+function LoginAccountIdHint({ accountId }: { accountId: string | null }) {
+  return (
+    <p
+      className="mt-3 text-center font-mono text-[11px] leading-tight text-muted-foreground/60"
+      translate="no"
+    >
+      登录账号ID：{accountId ?? '未登录'}
+    </p>
+  );
+}
+
 const inputClass =
   'w-full rounded-xl border border-border bg-background px-4 py-3 text-foreground placeholder:text-muted-foreground/60 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/25';
 const labelClass = 'mb-2 block font-display text-sm font-semibold text-foreground';
@@ -105,36 +99,23 @@ export function Lead2026Page({
   wechatOAuthExchangeError?: string | null;
 } = {}) {
   const token = getZionJwt();
+  const jwtAccountId = getZionJwtUserId();
   const wechatOAuthConfigured = Boolean(
     import.meta.env.VITE_ZION_WECHAT_OAUTH_URL?.trim()
   );
-  const wechatUrl = buildWechatLoginUrl();
+  const inWeChatBrowser = isWeixinBrowser();
+  const wechatUrlMobile = buildWechatOAuthUrlForWeixinBrowser();
+  const pcOauthBase = import.meta.env.VITE_ZION_WECHAT_OAUTH_URL_PC?.trim();
+  const wechatUrlDesktop = pcOauthBase
+    ? buildWechatOAuthRedirectUrl(pcOauthBase)
+    : '';
 
   useLayoutEffect(() => {
     captureInviterRefFromUrl();
   }, []);
 
-  const devMockAccountId = import.meta.env.DEV
-    ? getDevMockAccountId()
-    : null;
-
-  const [loginGateSkipped, setLoginGateSkipped] = useState(() => {
-    if (getZionJwt()) return false;
-    return getSkipLoginGate();
-  });
-
-  useEffect(() => {
-    if (!token) return;
-    setSkipLoginGate(false);
-    setLoginGateSkipped(false);
-  }, [token]);
-
-  const guestPreviewMode =
-    !token && loginGateSkipped && !devMockAccountId;
-
   const { data: logoData } = useQuery<BrandLogoQueryData>(BRAND_LOGO_FROM_GLOBAL_DOC, {
     variables: { type: BRAND_LOGO_GLOBAL_DOC_TYPE },
-    // 图片 url 常带短期签名，不走缓存；每次进入页面重新请求拿新地址
     fetchPolicy: 'no-cache',
   });
   const brandLogoUrl =
@@ -145,57 +126,153 @@ export function Lead2026Page({
     loading: meLoading,
     error: meError,
   } = useQuery<{ account: MeAccountRow[] }>(ME_ACCOUNT, {
-    skip: !token || guestPreviewMode,
+    variables: { accountId: jwtAccountId ?? '0' },
+    skip: !token || !jwtAccountId,
     fetchPolicy: 'network-only',
   });
 
-  const apiMeRow = meData?.account?.[0];
-  const meRow: MeAccountRow | undefined =
-    !token && devMockAccountId
-      ? { id: devMockAccountId, username: '本地模拟用户' }
-      : apiMeRow;
+  const meRow = meData?.account?.[0];
 
-  const viewFillMode = useMemo(
-    () => new URLSearchParams(window.location.search).get('view') === 'fill',
-    []
-  );
+  /** 仅由 VITE_WENJUAN_PAY_REQUIRE_SUBMIT 控制；与 VITE_WENJUAN_PAY_ENABLED（微信支付卡片）解耦 */
+  const paySubmitRequired = isWenjuanPayRequiredForSubmit();
 
   const {
-    data: profileData,
-    loading: profileLoading,
-    error: profileError,
-  } = useQuery<UserProfileByAccountData>(USER_PROFILE_BY_ACCOUNT, {
+    data: eligibilityData,
+    loading: eligibilityLoading,
+    error: eligibilityError,
+    refetch: refetchEligibility,
+  } = useQuery<WenjuanPayEligibilityData>(WENJUAN_PAY_ELIGIBILITY, {
     variables: { accountId: meRow?.id ?? '0' },
-    skip: !meRow || guestPreviewMode,
+    skip: !token || !meRow?.id || !paySubmitRequired,
+    fetchPolicy: 'network-only',
+    notifyOnNetworkStatusChange: true,
+  });
+
+  const {
+    data: leadExistsData,
+    loading: leadExistsLoading,
+    error: leadExistsError,
+  } = useQuery<MyLead2026ExistsData>(MY_LEAD_2026_EXISTS, {
+    variables: { accountId: meRow?.id ?? '0' },
+    skip: !token || !meRow?.id,
     fetchPolicy: 'network-only',
   });
 
-  useEffect(() => {
-    if (!import.meta.env.DEV) return;
-    if (!meRow || guestPreviewMode) return;
-    if (profileLoading) return;
-    const rows = profileData?.ud_yonghuxinxi_89e7ab;
-    const row = rows?.[0];
-    console.info('[问卷收集][调试] 用户库 USER_PROFILE_BY_ACCOUNT', {
-      accountId: meRow.id,
-      profileError: profileError?.message ?? null,
-      rowCount: rows?.length ?? 0,
-      userKuId: row?.id ?? null,
-      phone: row?.ud_phone_one_dbcfc6 ?? null,
-      identity: row?.identity ?? null,
-      name: row?.name ?? null,
-    });
-  }, [
-    meRow,
-    guestPreviewMode,
-    profileLoading,
-    profileData,
-    profileError,
-  ]);
+  const hasSuccessfulPayment = useMemo(() => {
+    return (
+      eligibilityData?.fz_payment_record?.some((r) =>
+        isZionPaymentSuccessful(r.status)
+      ) ?? false
+    );
+  }, [eligibilityData]);
+
+  const paidViaZion = hasSuccessfulPayment;
 
   const [screen, setScreen] = useState<Screen>('form');
   const [form, setForm] = useState<Lead2026FormValues>(emptyLeadForm);
   const [submitErr, setSubmitErr] = useState<string | null>(null);
+
+  const [payUnlocked, setPayUnlocked] = useState(() => {
+    if (!isWenjuanPayRequiredForSubmit()) {
+      return true;
+    }
+    if (!isWenjuanPayManualClientConfirmAllowed()) {
+      return false;
+    }
+    try {
+      return sessionStorage.getItem(WENJUAN_PAY_OK_STORAGE_KEY) === '1';
+    } catch {
+      return false;
+    }
+  });
+
+  const alreadySubmitted =
+    (leadExistsData?.ud_wenjuanshouji_2026yinliu_cb3e5d?.length ?? 0) > 0;
+
+  /** 须先停留在支付页，完成支付（或手动确认）后才能进入问卷填写页 */
+  const needPayWall =
+    paySubmitRequired &&
+    !payUnlocked &&
+    (eligibilityLoading || !paidViaZion);
+
+  const confirmPaidWithBackend = useCallback(async (): Promise<boolean> => {
+    await new Promise((r) => setTimeout(r, WENJUAN_PAY_WEBHOOK_WAIT_MS));
+    const r1 = await refetchEligibility();
+    const ok1 =
+      r1.data?.fz_payment_record?.some((rec) =>
+        isZionPaymentSuccessful(rec.status)
+      ) ?? false;
+    if (ok1) return true;
+    await new Promise((r) => setTimeout(r, WENJUAN_PAY_WEBHOOK_RETRY_WAIT_MS));
+    const r2 = await refetchEligibility();
+    return (
+      r2.data?.fz_payment_record?.some((rec) =>
+        isZionPaymentSuccessful(rec.status)
+      ) ?? false
+    );
+  }, [refetchEligibility]);
+
+  useEffect(() => {
+    if (!token || !meRow?.id || !paySubmitRequired) return;
+    let h5OnLoad = false;
+    try {
+      h5OnLoad = sessionStorage.getItem(WENJUAN_WXPAY_H5_PENDING_KEY) === '1';
+    } catch {
+      /* ignore */
+    }
+    if (!h5OnLoad) return;
+    const t = window.setTimeout(() => {
+      try {
+        sessionStorage.removeItem(WENJUAN_WXPAY_H5_PENDING_KEY);
+      } catch {
+        /* ignore */
+      }
+      void refetchEligibility();
+    }, WENJUAN_PAY_WEBHOOK_WAIT_MS);
+    return () => window.clearTimeout(t);
+  }, [token, meRow?.id, paySubmitRequired, refetchEligibility]);
+
+  useEffect(() => {
+    if (!token || !meRow?.id || !paySubmitRequired) return;
+    const onVis = () => {
+      if (document.visibilityState !== 'visible') return;
+      let h5Pending = false;
+      try {
+        h5Pending =
+          sessionStorage.getItem(WENJUAN_WXPAY_H5_PENDING_KEY) === '1';
+      } catch {
+        /* ignore */
+      }
+      if (h5Pending) {
+        window.setTimeout(() => {
+          try {
+            sessionStorage.removeItem(WENJUAN_WXPAY_H5_PENDING_KEY);
+          } catch {
+            /* ignore */
+          }
+          void refetchEligibility();
+        }, WENJUAN_PAY_WEBHOOK_WAIT_MS);
+        return;
+      }
+      void refetchEligibility();
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  }, [token, meRow?.id, paySubmitRequired, refetchEligibility]);
+
+  const showWechatPayCard =
+    paySubmitRequired &&
+    isWenjuanWechatPayEnabled() &&
+    !payUnlocked &&
+    !paidViaZion;
+
+  const showPayCompleteFallback =
+    paySubmitRequired &&
+    isWenjuanPayManualClientConfirmAllowed() &&
+    !isWenjuanWechatPayEnabled() &&
+    !payUnlocked &&
+    !paidViaZion &&
+    !eligibilityLoading;
 
   const [insertLead] = useMutation(INSERT_LEAD_2026);
 
@@ -219,11 +296,19 @@ export function Lead2026Page({
 
   const onSubmitForm = useCallback(
     async (v: Lead2026FormValues) => {
-      if (guestPreviewMode) {
-        setSubmitErr('当前为跳过登录模式，请先在后台配置微信授权并完成登录后再提交。');
+      if (!meRow) return;
+      if (alreadySubmitted) {
+        setSubmitErr('您已提交过问卷，不可重复提交。');
         return;
       }
-      if (!meRow) return;
+      if (
+        paySubmitRequired &&
+        !payUnlocked &&
+        (eligibilityLoading || !paidViaZion)
+      ) {
+        setSubmitErr('请先完成支付后再填写提交');
+        return;
+      }
       setSubmitErr(null);
       try {
         await doInsert(v, meRow);
@@ -232,7 +317,15 @@ export function Lead2026Page({
         setSubmitErr(friendlyRequestErrorMessage(e));
       }
     },
-    [doInsert, guestPreviewMode, meRow]
+    [
+      doInsert,
+      meRow,
+      alreadySubmitted,
+      paySubmitRequired,
+      payUnlocked,
+      eligibilityLoading,
+      paidViaZion,
+    ]
   );
 
   function validate(v: Lead2026FormValues): string | null {
@@ -263,6 +356,25 @@ export function Lead2026Page({
     });
   }
 
+  if (screen === 'thanks' && meRow) {
+    return (
+      <div className="relative z-10 mx-auto max-w-lg px-4 py-16 text-center">
+        <div className="rounded-[2rem] border border-border bg-card p-10 shadow-organic">
+          <p className="text-4xl" aria-hidden>
+            ✓
+          </p>
+          <h2 className="mt-4 font-display text-3xl text-foreground">
+            提交成功
+          </h2>
+          <p className="mt-3 text-muted-foreground">
+            感谢您的填写，我们已收到问卷信息。
+          </p>
+        </div>
+        <SubtleAccountFooter accountId={meRow.id} />
+      </div>
+    );
+  }
+
   if (screen === 'thanks') {
     return (
       <div className="relative z-10 mx-auto max-w-lg px-4 py-16 text-center">
@@ -281,20 +393,23 @@ export function Lead2026Page({
     );
   }
 
-  if (!token && !loginGateSkipped && !devMockAccountId) {
+  if (!token) {
     return (
       <LoginGateScreen
         logoUrl={brandLogoUrl}
-        wechatUrl={wechatUrl}
+        loginAccountId={jwtAccountId}
+        inWeChatBrowser={inWeChatBrowser}
+        wechatUrlMobile={wechatUrlMobile}
+        wechatUrlDesktop={wechatUrlDesktop}
         wechatOAuthConfigured={wechatOAuthConfigured}
         oauthExchangePending={wechatOAuthExchangePending}
         oauthExchangeError={wechatOAuthExchangeError}
         title="请先登录"
-        subtitle="填写问卷前需使用微信完成授权登录。登录成功后将自动回到本页并开始填写。"
-        onSkip={() => {
-          setSkipLoginGate(true);
-          setLoginGateSkipped(true);
-        }}
+        subtitle={
+          inWeChatBrowser
+            ? '请先完成微信授权登录。登录后将进入支付或问卷流程。'
+            : '在电脑浏览器中可使用下方「微信登录」扫码；或在手机微信中直接打开本页完成授权。'
+        }
       />
     );
   }
@@ -334,66 +449,152 @@ export function Lead2026Page({
     );
   }
 
-  if (meRow && !guestPreviewMode && !viewFillMode) {
-    if (profileLoading) {
-      return (
-        <div className="relative z-10 flex min-h-[50vh] flex-col items-center justify-center gap-3 text-muted-foreground">
-          <p>正在加载用户身份…</p>
-        </div>
-      );
-    }
-    const profileRow = profileData?.ud_yonghuxinxi_89e7ab?.[0];
-    const identityFromDb = profileRow?.identity ?? null;
-    const staffIdentity: string | null = isStaffIdentity(identityFromDb)
-      ? identityFromDb
-      : !profileRow
-        ? devStaffIdentityWhenProfileMissing(meRow.id)
-        : null;
+  if (token && meRow && leadExistsLoading) {
+    return (
+      <div className="relative z-10 flex min-h-[50vh] flex-col items-center justify-center gap-3 text-muted-foreground">
+        <p>正在确认是否已填写过问卷…</p>
+      </div>
+    );
+  }
 
-    if (isStaffIdentity(staffIdentity)) {
-      return (
-        <AdminLeadHubPage
-          brandLogoUrl={brandLogoUrl}
-          identity={staffIdentity}
-          inviterUserLibraryId={
-            profileRow?.id != null
-              ? String(profileRow.id)
-              : devInviterYonghukuIdWhenProfileMissing(meRow.id)
-          }
-          devUserKuSnapshot={
-            import.meta.env.DEV
-              ? {
-                  accountId: meRow.id,
-                  profileErrorMessage: profileError?.message ?? null,
-                  profileQueryReturnedRows:
-                    profileData?.ud_yonghuxinxi_89e7ab?.length ?? 0,
-                  userKuId:
-                    profileRow?.id != null ? String(profileRow.id) : null,
-                  phone: profileRow?.ud_phone_one_dbcfc6 ?? null,
-                  identity: profileRow?.identity ?? null,
-                }
-              : undefined
-          }
-          displayName={
-            meRow.username?.trim() ||
-            profileRow?.name?.trim() ||
-            `ID ${meRow.id}`
-          }
-          onOpenFillForm={() => {
-            clearInviterYonghukuId();
-            window.location.assign(
-              `${window.location.pathname}?view=fill`
-            );
-          }}
-          onLogout={() => {
-            clearDevMockAccountId();
-            clearZionJwt();
-            setSkipLoginGate(false);
-            window.location.assign(window.location.pathname);
-          }}
-        />
-      );
-    }
+  if (token && meRow && leadExistsError) {
+    return (
+      <div className="relative z-10 mx-auto max-w-md px-4 py-16 text-center">
+        <div className="rounded-[2rem] border border-border bg-card p-8 shadow-organic-sm">
+          <h2 className="font-display text-xl text-destructive">无法校验问卷记录</h2>
+          <p className="mt-3 text-sm text-muted-foreground">
+            {friendlyRequestErrorMessage(leadExistsError)}
+          </p>
+          <button
+            type="button"
+            className="mt-6 rounded-full bg-primary px-8 py-3 font-semibold text-primary-foreground"
+            onClick={() => window.location.reload()}
+          >
+            点击刷新
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (token && meRow && alreadySubmitted) {
+    return (
+      <div className="relative z-10 mx-auto max-w-lg px-4 py-16 text-center">
+        <div className="rounded-[2rem] border border-border bg-card p-10 shadow-organic">
+          <p className="text-4xl" aria-hidden>
+            ✓
+          </p>
+          <h2 className="mt-4 font-display text-3xl text-foreground">您已填写过问卷</h2>
+          <p className="mt-3 text-muted-foreground">
+            每个帐户仅可提交一次。如需修改请联系工作人员。
+          </p>
+        </div>
+        <SubtleAccountFooter accountId={meRow.id} />
+      </div>
+    );
+  }
+
+  if (token && meRow && needPayWall) {
+    return (
+      <div className="relative z-10 mx-auto max-w-2xl px-4 py-10 md:py-14">
+        <header className="mb-10 text-center">
+          <BrandLogoMark
+            url={brandLogoUrl}
+            title="问卷收集 · 支付"
+            isPrimaryPageHeading
+            className="mb-5"
+          />
+          <p className="mx-auto mt-3 max-w-md text-sm text-muted-foreground">
+            {eligibilityLoading
+              ? '正在确认支付状态…'
+              : '请先完成支付。支付成功后，将自动进入问卷填写页面。'}
+          </p>
+          <div className="mt-4 flex flex-wrap items-center justify-center gap-3 text-xs text-muted-foreground">
+            <span>
+              帐户：
+              <span className="font-medium text-foreground">
+                {meRow.username?.trim() || '已登录'}
+              </span>
+            </span>
+            <button
+              type="button"
+              className="underline decoration-border hover:text-foreground"
+              onClick={() => {
+                clearInviterYonghukuId();
+                clearZionJwt();
+                window.location.reload();
+              }}
+            >
+              退出并换帐号
+            </button>
+          </div>
+          <LoginAccountIdHint accountId={jwtAccountId ?? meRow.id} />
+        </header>
+
+        {paySubmitRequired && eligibilityError ? (
+          <div
+            className="mx-auto mb-6 max-w-2xl rounded-2xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-accent-foreground"
+            role="alert"
+          >
+            <p>
+              支付状态校验失败（无法读取支付记录）：{' '}
+              {friendlyRequestErrorMessage(eligibilityError)}
+            </p>
+            <button
+              type="button"
+              className="mt-2 text-sm font-semibold text-primary underline decoration-primary/40 underline-offset-2"
+              onClick={() => void refetchEligibility()}
+            >
+              点击重试
+            </button>
+          </div>
+        ) : null}
+
+        <article className="rounded-tl-[1.75rem] rounded-tr-[1.25rem] rounded-br-[2rem] rounded-bl-[1.35rem] border border-border bg-card p-6 shadow-organic-sm md:p-10">
+          {showWechatPayCard ? (
+            <WenjuanWechatPayCard
+              accountId={meRow.id}
+              confirmPaidWithBackend={confirmPaidWithBackend}
+              onPaidMarked={() => setPayUnlocked(true)}
+            />
+          ) : null}
+          {showPayCompleteFallback ? (
+            <section
+              className="mb-8 rounded-2xl border border-border/80 bg-muted/40 p-5 text-left shadow-[0_4px_20px_-2px_rgba(93,112,82,0.12)]"
+              aria-label="支付确认"
+            >
+              <h2 className="font-display text-lg text-primary">须先完成支付</h2>
+              <p className="mt-2 text-sm text-muted-foreground leading-relaxed">
+                当前未启用页面内微信支付。若您已通过其他渠道付款或后台已记账，可点击下方按钮。
+              </p>
+              <button
+                type="button"
+                className="mt-4 min-h-12 rounded-full border-2 border-secondary bg-transparent px-6 py-3 text-sm font-bold text-secondary transition duration-300 ease-out hover:bg-secondary/10"
+                onClick={() => {
+                  try {
+                    sessionStorage.setItem(WENJUAN_PAY_OK_STORAGE_KEY, '1');
+                  } catch {
+                    /* ignore */
+                  }
+                  setPayUnlocked(true);
+                }}
+              >
+                我已完成支付
+              </button>
+            </section>
+          ) : null}
+          {!showWechatPayCard && !showPayCompleteFallback && !eligibilityLoading ? (
+            <p className="text-sm text-muted-foreground">
+              未启用微信支付卡片且未开放手动确认时，无法在本页完成支付，请联系管理员配置{' '}
+              <code className="text-accent-foreground">VITE_WENJUAN_PAY_ENABLED</code> 或{' '}
+              <code className="text-accent-foreground">VITE_WENJUAN_PAY_ALLOW_MANUAL_OK</code>。
+            </p>
+          ) : null}
+        </article>
+
+        <SubtleAccountFooter accountId={meRow.id} />
+      </div>
+    );
   }
 
   return (
@@ -405,73 +606,29 @@ export function Lead2026Page({
           isPrimaryPageHeading
           className="mb-5"
         />
-        {guestPreviewMode ? (
-          <>
-            <p className="mx-auto mt-3 max-w-md text-sm text-muted-foreground">
-              您已跳过登录，可先预览并填写表单。配置微信授权并登录后，即可提交并关联帐户。
-            </p>
-            <div className="mx-auto mt-4 max-w-md rounded-2xl border border-secondary/40 bg-accent/40 px-4 py-3 text-left text-xs text-accent-foreground">
-              <p className="font-semibold text-foreground">预览模式</p>
-              <p className="mt-1 text-muted-foreground">
-                提交按钮已禁用。完成{' '}
-                <code className="rounded bg-muted px-1 text-foreground">
-                  VITE_ZION_WECHAT_OAUTH_URL
-                </code>{' '}
-                配置后，请刷新页面并微信登录。
-              </p>
-            </div>
-            <div className="mt-4 flex flex-wrap items-center justify-center gap-3 text-xs text-muted-foreground">
-              <button
-                type="button"
-                className="underline decoration-border hover:text-foreground"
-                onClick={() => {
-                  setSkipLoginGate(false);
-                  setLoginGateSkipped(false);
-                  window.location.reload();
-                }}
-              >
-                返回登录页
-              </button>
-            </div>
-          </>
-        ) : (
-          <>
-            {devMockAccountId && !token ? (
-              <div className="mx-auto mt-3 max-w-md rounded-xl border border-secondary/50 bg-accent/50 px-4 py-3 text-left text-xs text-accent-foreground">
-                <p className="font-semibold text-foreground">开发模式 · 模拟帐户 ID</p>
-                <p className="mt-1 text-muted-foreground">
-                  当前未带 JWT，仅前端把问卷关联到 ID{' '}
-                  <code className="text-foreground">{devMockAccountId}</code>
-                  。提交是否成功取决于 Zion 匿名/权限配置；正式环境请用微信登录。
-                </p>
-              </div>
-            ) : (
-              <p className="mx-auto mt-3 max-w-md text-sm text-muted-foreground">
-                您已登录，请填写下列信息。提交后将关联到当前帐户。
-              </p>
-            )}
-            <div className="mt-4 flex flex-wrap items-center justify-center gap-3 text-xs text-muted-foreground">
-              <span>
-                帐户：
-                <span className="font-medium text-foreground">
-                  {meRow?.username?.trim() || (meRow ? `ID ${meRow.id}` : '')}
-                </span>
-              </span>
-              <button
-                type="button"
-                className="underline decoration-border hover:text-foreground"
-                onClick={() => {
-                  clearDevMockAccountId();
-                  clearZionJwt();
-                  setSkipLoginGate(false);
-                  window.location.reload();
-                }}
-              >
-                退出并换帐号
-              </button>
-            </div>
-          </>
-        )}
+        <p className="mx-auto mt-3 max-w-md text-sm text-muted-foreground">
+          请填写下列信息。每位登录帐户仅可提交一次，提交后将关联到当前帐户。
+        </p>
+        <div className="mt-4 flex flex-wrap items-center justify-center gap-3 text-xs text-muted-foreground">
+          <span>
+            帐户：
+            <span className="font-medium text-foreground">
+              {meRow?.username?.trim() || '已登录'}
+            </span>
+          </span>
+          <button
+            type="button"
+            className="underline decoration-border hover:text-foreground"
+            onClick={() => {
+              clearInviterYonghukuId();
+              clearZionJwt();
+              window.location.reload();
+            }}
+          >
+            退出并换帐号
+          </button>
+        </div>
+        <LoginAccountIdHint accountId={jwtAccountId ?? meRow?.id ?? null} />
       </header>
 
       <article className="rounded-tl-[1.75rem] rounded-tr-[1.25rem] rounded-br-[2rem] rounded-bl-[1.35rem] border border-border bg-card p-6 shadow-organic-sm md:p-10">
@@ -651,39 +808,47 @@ export function Lead2026Page({
 
           <button
             type="submit"
-            disabled={guestPreviewMode}
-            className="rounded-full bg-secondary px-10 py-3.5 font-semibold text-secondary-foreground shadow-organic-sm transition enabled:hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-full bg-secondary px-10 py-3.5 font-semibold text-secondary-foreground shadow-organic-sm transition enabled:hover:opacity-95"
           >
-            {guestPreviewMode ? '配置登录后可提交' : '提交问卷'}
+            提交问卷
           </button>
         </form>
       </article>
+
+      {meRow && token ? <SubtleAccountFooter accountId={meRow.id} /> : null}
     </div>
   );
 }
 
 function LoginGateScreen({
   logoUrl,
-  wechatUrl,
+  loginAccountId,
+  inWeChatBrowser,
+  wechatUrlMobile,
+  wechatUrlDesktop,
   wechatOAuthConfigured,
   oauthExchangePending,
   oauthExchangeError,
   title,
   subtitle,
-  onSkip,
 }: {
   logoUrl: string | null;
-  wechatUrl: string;
+  loginAccountId: string | null;
+  inWeChatBrowser: boolean;
+  wechatUrlMobile: string;
+  wechatUrlDesktop: string;
   wechatOAuthConfigured: boolean;
   oauthExchangePending: boolean;
   oauthExchangeError: string | null;
   title: string;
   subtitle: string;
-  onSkip: () => void;
 }) {
-  const [devMockIdInput, setDevMockIdInput] = useState(
-    DEFAULT_DEV_MOCK_ACCOUNT_ID
-  );
+  const [linkCopied, setLinkCopied] = useState(false);
+
+  const qrSrc =
+    wechatUrlMobile.length > 0
+      ? `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(wechatUrlMobile)}`
+      : '';
 
   return (
     <div className="relative z-10 mx-auto flex min-h-[70vh] max-w-lg flex-col justify-center px-4 py-12">
@@ -714,9 +879,7 @@ function LoginGateScreen({
             <span className="mt-2 block text-muted-foreground">
               可重新点击「微信一键授权登录」；若反复失败，请到 Zion
               后台核对网页授权与 <code className="text-foreground">loginWithWechat</code>{' '}
-              配置。开发调试仍可用 URL 参数{' '}
-              <code className="text-foreground">token</code> /{' '}
-              <code className="text-foreground">jwt</code> 传入 JWT。
+              配置。
             </span>
           </p>
         ) : null}
@@ -731,93 +894,98 @@ function LoginGateScreen({
             。仅改服务器上的 <code className="text-foreground">.env</code> 而不重新打包，线上页面不会更新。
           </p>
         ) : null}
-        {import.meta.env.DEV ? (
-          <div className="mx-auto mt-5 max-w-sm rounded-xl border border-dashed border-primary/50 bg-muted/40 p-4 text-left text-xs text-muted-foreground">
-            <p className="font-semibold text-foreground">本地调试</p>
-            <ul className="mt-2 list-disc space-y-1.5 pl-4">
-              <li>
-                公众平台授权回调域名通常<strong>不能</strong>填{' '}
-                <code className="text-foreground">localhost</code> / 局域网 IP，本地一般无法完成「微信内一键授权」全流程；不部署时可用下方方式模拟。
-              </li>
-              <li>
-                <strong>模拟登录</strong>：用 Zion 其它途径拿到 JWT 后访问（端口以终端为准）：
-                <code className="mt-1 block break-all rounded bg-background/80 px-1 py-0.5 text-[11px] text-foreground">
-                  {`${window.location.origin}${window.location.pathname}?token=`}
-                  <span className="text-muted-foreground">你的JWT</span>
-                </code>
-                也支持 <code className="text-foreground">jwt</code>、
-                <code className="text-foreground">access_token</code> 及 hash 传参。
-              </li>
-              <li>
-                <strong>只测界面</strong>：点「暂不登录，先进入问卷」。
-              </li>
-              <li>
-                <strong>只测帐户 ID</strong>：用下方输入框填 Zion 的{' '}
-                <code className="text-foreground">account.id</code>，不经过 JWT。
-              </li>
-            </ul>
-          </div>
-        ) : null}
-        {import.meta.env.DEV ? (
-          <div className="mx-auto mt-5 w-full max-w-sm text-left">
-            <label
-              htmlFor="dev-mock-account-id"
-              className="block text-xs font-semibold text-foreground"
-            >
-              模拟帐户 ID
-            </label>
-            <p className="mt-0.5 text-[11px] text-muted-foreground">
-              仅开发模式；无 JWT 时后端读不到用户库身份，默认 ID{' '}
-              {DEFAULT_DEV_MOCK_ACCOUNT_ID} 仍会按管理身份打开管理台；列表/提交是否成功取决于
-              Zion 匿名权限。
-            </p>
-            <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-stretch">
-              <input
-                id="dev-mock-account-id"
-                type="text"
-                autoComplete="off"
-                className={inputClass}
-                placeholder={DEFAULT_DEV_MOCK_ACCOUNT_ID}
-                value={devMockIdInput}
-                onChange={(e) => setDevMockIdInput(e.target.value)}
-              />
-              <button
-                type="button"
-                className="h-12 shrink-0 rounded-full bg-primary px-6 font-semibold text-primary-foreground shadow-organic-sm transition hover:opacity-95 sm:self-start"
-                onClick={() => {
-                  const v = devMockIdInput.trim();
-                  if (!v) return;
-                  setDevMockAccountId(v);
-                  window.location.reload();
-                }}
-              >
-                用此 ID 进入
-              </button>
-            </div>
-          </div>
-        ) : null}
         <div className="mt-8 flex flex-col items-stretch gap-3 sm:items-center">
-          {wechatUrl ? (
-            <a
-              href={wechatUrl}
-              rel="noopener noreferrer"
-              aria-disabled={oauthExchangePending}
-              className={`inline-flex min-h-12 items-center justify-center rounded-full bg-[#07C160] px-8 py-3.5 font-semibold text-white shadow-organic-sm ${
-                oauthExchangePending
-                  ? 'pointer-events-none cursor-wait opacity-60'
-                  : 'hover:opacity-95'
-              }`}
-            >
-              {oauthExchangePending ? '登录处理中…' : '微信一键授权登录'}
-            </a>
+          {wechatUrlMobile ? (
+            <>
+              {inWeChatBrowser ? (
+                <a
+                  href={wechatUrlMobile}
+                  rel="noopener noreferrer"
+                  aria-disabled={oauthExchangePending}
+                  className={`inline-flex min-h-12 items-center justify-center rounded-full bg-[#07C160] px-8 py-3.5 font-semibold text-white shadow-organic-sm ${
+                    oauthExchangePending
+                      ? 'pointer-events-none cursor-wait opacity-60'
+                      : 'hover:opacity-95'
+                  }`}
+                >
+                  {oauthExchangePending ? '登录处理中…' : '微信一键授权登录'}
+                </a>
+              ) : wechatUrlDesktop ? (
+                <>
+                  <a
+                    href={wechatUrlDesktop}
+                    rel="noopener noreferrer"
+                    className="inline-flex min-h-12 items-center justify-center rounded-full bg-[#07C160] px-8 py-3.5 font-semibold text-white shadow-organic-sm hover:opacity-95"
+                  >
+                    微信登录（浏览器内扫码）
+                  </a>
+                  <p className="max-w-sm text-center text-xs text-muted-foreground leading-relaxed">
+                    左键点击后会在<strong className="text-foreground">当前浏览器窗口</strong>
+                    打开微信开放平台扫码页；用手机扫码并确认后，应<strong className="text-foreground">
+                      自动跳回本页
+                    </strong>
+                    并完成登录。请勿依赖「右键 → 在新标签页打开」后仍停留在旧标签；若未跳转，请检查开放平台回调域名与当前站点是否一致（见项目{' '}
+                    <code className="text-foreground">.env.example</code>）。
+                  </p>
+                </>
+              ) : (
+                <>
+                  <div className="max-w-sm rounded-2xl border border-secondary/40 bg-accent/30 p-3 text-left text-xs text-accent-foreground leading-relaxed">
+                    <p className="font-semibold text-foreground">电脑浏览器 + 下方二维码</p>
+                    <p className="mt-1">
+                      二维码里是<strong className="text-foreground">公众号网页授权</strong>
+                      链接，只会在你<strong className="text-foreground">手机微信里</strong>
+                      完成授权；手机会登录，但<strong className="text-foreground">
+                        电脑上的本页不会自动变成已登录
+                      </strong>
+                      （微信不会把 code 发给电脑）。这与仓库{' '}
+                      <code className="text-foreground">.env.example</code> 里「系统浏览器无法直接打开授权页」的说明一致。
+                    </p>
+                    <p className="mt-2">
+                      若要在<strong className="text-foreground">电脑同一浏览器窗口</strong>
+                      内扫码并自动回跳登录，请在环境变量中增加开放平台「网站应用」的{' '}
+                      <code className="text-foreground">VITE_ZION_WECHAT_OAUTH_URL_PC</code>
+                      （qrconnect 模板见 <code className="text-foreground">.env.example</code>
+                      ），与 Zion 后台换票配置一致后重新构建部署。
+                    </p>
+                  </div>
+                  <p className="max-w-sm text-left text-xs text-muted-foreground leading-relaxed">
+                    也可点击「复制授权链接」粘贴到微信聊天中再打开。
+                  </p>
+                  {qrSrc ? (
+                    <div className="mt-2 flex flex-col items-center gap-2">
+                      <img
+                        src={qrSrc}
+                        alt="在微信中打开此二维码以登录"
+                        width={220}
+                        height={220}
+                        className="rounded-2xl border border-border bg-white p-2 shadow-organic-sm"
+                        loading="eager"
+                        decoding="async"
+                      />
+                      <span className="text-[11px] text-muted-foreground">
+                        二维码由第三方服务生成，仅用于编码当前授权链接
+                      </span>
+                    </div>
+                  ) : null}
+                  <button
+                    type="button"
+                    className="inline-flex min-h-12 items-center justify-center rounded-full border-2 border-primary bg-transparent px-8 py-3 text-sm font-bold text-primary transition duration-300 ease-out hover:bg-primary/10"
+                    onClick={() => {
+                      void navigator.clipboard.writeText(wechatUrlMobile).then(
+                        () => {
+                          setLinkCopied(true);
+                          window.setTimeout(() => setLinkCopied(false), 2500);
+                        }
+                      );
+                    }}
+                  >
+                    {linkCopied ? '已复制' : '复制授权链接'}
+                  </button>
+                </>
+              )}
+            </>
           ) : null}
-          <button
-            type="button"
-            className="rounded-full border-2 border-secondary bg-transparent px-8 py-3 font-bold text-secondary transition-all duration-300 hover:bg-secondary/10"
-            onClick={onSkip}
-          >
-            暂不登录，先进入问卷
-          </button>
           <button
             type="button"
             className="text-sm text-muted-foreground underline"
@@ -825,6 +993,7 @@ function LoginGateScreen({
           >
             已完成登录？点击刷新
           </button>
+          <LoginAccountIdHint accountId={loginAccountId} />
         </div>
       </div>
     </div>

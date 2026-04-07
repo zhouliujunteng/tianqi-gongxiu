@@ -1,10 +1,14 @@
 import { ApolloError, ApolloProvider } from '@apollo/client';
-import { useLayoutEffect, useMemo, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import {
   captureInviterRefFromOAuthState,
   captureInviterRefFromUrl,
 } from './auth/inviterRef';
-import { consumeJwtFromUrl, setZionJwt } from './auth/zionJwt';
+import {
+  getWechatOAuthCodeFromLocation,
+  stripWechatOAuthParamsFromLocation,
+} from './auth/wechatOAuthCallback';
+import { consumeJwtFromUrl, getZionJwt, setZionJwt } from './auth/zionJwt';
 import { createApolloClient, isZionConfigured } from './apollo/client';
 import { OrganicBackgroundBlobs } from './components/OrganicBackgroundBlobs';
 import { LOGIN_WITH_WECHAT } from './graphql/operations';
@@ -39,21 +43,18 @@ export function App() {
       return;
     }
 
-    const sp = new URLSearchParams(window.location.search);
-    const code = sp.get('code')?.trim();
-    if (!code) return;
+    const oauth = getWechatOAuthCodeFromLocation();
+    if (!oauth) return;
+
+    const { code, state, paramsIn } = oauth;
 
     setWechatOAuthExchangePending(true);
     setWechatOAuthExchangeError(null);
 
-    captureInviterRefFromOAuthState(sp.get('state'));
+    captureInviterRefFromOAuthState(state);
     captureInviterRefFromUrl();
 
-    sp.delete('code');
-    sp.delete('state');
-    const q = sp.toString();
-    const nextPath = `${window.location.pathname}${q ? `?${q}` : ''}`;
-    window.history.replaceState({}, document.title, nextPath);
+    stripWechatOAuthParamsFromLocation(paramsIn);
 
     // Zion 已对接微信：仅用 code 换 Zion JWT，不在前端换微信私有 token
     void client
@@ -86,6 +87,19 @@ export function App() {
         setWechatOAuthExchangeError(oauthFailureMessage(e));
       });
   }, [client]);
+
+  useEffect(() => {
+    if (!isZionConfigured()) return;
+    const onPageShow = (e: PageTransitionEvent) => {
+      if (!e.persisted) return;
+      const pending = getWechatOAuthCodeFromLocation();
+      if (pending && !getZionJwt()) {
+        window.location.reload();
+      }
+    };
+    window.addEventListener('pageshow', onPageShow);
+    return () => window.removeEventListener('pageshow', onPageShow);
+  }, []);
 
   if (!isZionConfigured()) {
     return (

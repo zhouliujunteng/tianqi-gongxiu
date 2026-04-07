@@ -1,28 +1,5 @@
 const STORAGE_KEY = 'zion_jwt';
 
-/** 本地「跳过登录门」仅用于开发/未配置 OAuth 时预览问卷，不写入 JWT */
-const SKIP_LOGIN_GATE_KEY = 'tqwj_skip_login_gate';
-
-export function getSkipLoginGate(): boolean {
-  try {
-    return localStorage.getItem(SKIP_LOGIN_GATE_KEY) === '1';
-  } catch {
-    return false;
-  }
-}
-
-export function setSkipLoginGate(enabled: boolean): void {
-  try {
-    if (enabled) {
-      localStorage.setItem(SKIP_LOGIN_GATE_KEY, '1');
-    } else {
-      localStorage.removeItem(SKIP_LOGIN_GATE_KEY);
-    }
-  } catch {
-    /* ignore */
-  }
-}
-
 /** OAuth 回跳时可能使用的 query / hash 参数名 */
 const TOKEN_QUERY_KEYS = ['token', 'jwt', 'access_token', 'authorization'];
 
@@ -40,6 +17,46 @@ export function setZionJwt(token: string): void {
 
 export function clearZionJwt(): void {
   localStorage.removeItem(STORAGE_KEY);
+}
+
+function decodeJwtPayload(token: string): Record<string, unknown> | null {
+  const parts = token.split('.');
+  if (parts.length < 2) return null;
+  try {
+    const b64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
+    const json = atob(padded);
+    const obj = JSON.parse(json) as unknown;
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return null;
+    return obj as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 从 JWT 里读取当前 Zion 用户 id（优先 x-hasura-user-id / ZERO_USER_ID）。
+ * 用于避免 `account(limit: 1)` 在权限配置异常时返回固定行导致前端显示错号。
+ */
+export function getZionJwtUserId(): string | null {
+  const t = getZionJwt();
+  if (!t) return null;
+  const payload = decodeJwtPayload(t);
+  if (!payload) return null;
+  const hasura = payload.hasura_claims;
+  if (hasura && typeof hasura === 'object' && !Array.isArray(hasura)) {
+    const uid = (hasura as Record<string, unknown>)['x-hasura-user-id'];
+    if (uid !== null && uid !== undefined) {
+      const s = String(uid).trim();
+      if (/^\d+$/.test(s)) return s;
+    }
+  }
+  const zeroUserId = payload.ZERO_USER_ID;
+  if (zeroUserId !== null && zeroUserId !== undefined) {
+    const s = String(zeroUserId).trim();
+    if (/^\d+$/.test(s)) return s;
+  }
+  return null;
 }
 
 /**

@@ -47,6 +47,9 @@ export function captureInviterRefFromOAuthState(state: string | null): void {
 /**
  * 在发起微信授权的请求 URL 上增加 state= tqwj_r_{用户库id}。
  * 若链接里已有 state（例如 Zion 固定 CSRF），不覆盖，避免破坏后台校验。
+ *
+ * 注意：不得用 URL/searchParams 改写整段授权链接。微信对 redirect_uri 编码极敏感，
+ * searchParams 会解码再序列化，易导致 redirect_uri 变化，从而出现「AppID 参数错误」类提示。
  */
 export function appendWechatOAuthStateForInviter(
   loginUrl: string,
@@ -54,10 +57,15 @@ export function appendWechatOAuthStateForInviter(
 ): string {
   if (!inviterRef || !/^\d+$/.test(inviterRef)) return loginUrl;
   try {
-    const u = new URL(loginUrl);
-    if (u.searchParams.has('state')) return loginUrl;
-    u.searchParams.set('state', `${OAUTH_STATE_PREFIX}${inviterRef}`);
-    return u.toString();
+    const hashIdx = loginUrl.indexOf('#');
+    const queryPart = hashIdx >= 0 ? loginUrl.slice(0, hashIdx) : loginUrl;
+    if (/[?&]state=/.test(queryPart)) return loginUrl;
+
+    const stateVal = encodeURIComponent(`${OAUTH_STATE_PREFIX}${inviterRef}`);
+    const sep = queryPart.includes('?') ? '&' : '?';
+    const injected = `${queryPart}${sep}state=${stateVal}`;
+
+    return hashIdx >= 0 ? `${injected}${loginUrl.slice(hashIdx)}` : injected;
   } catch {
     return loginUrl;
   }
