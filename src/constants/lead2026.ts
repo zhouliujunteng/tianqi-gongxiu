@@ -15,6 +15,10 @@ export const WENJUAN_TYPE_ROUTINE = '常规收集';
 
 /** 订单表「订单类型」字段：与 Zion 订单 ud_dingdanleixing_3fb8b8 一致 */
 export const WENJUAN_2026_ORDER_TYPE = '2026引流问卷';
+/** 订单表「订单类型」字段：共修营报名 */
+export const WENJUAN_CAMP_ORDER_TYPE = '2026共修营';
+/** 订单表「订单类型」字段：二阶共修营报名 */
+export const WENJUAN_ADVANCED_CAMP_ORDER_TYPE = '2026二阶共修营';
 
 /** 订单表「订单状态」字段：已支付（ud_dingdanleixing_3ade69） */
 export const WENJUAN_ORDER_STATUS_PAID = '已支付';

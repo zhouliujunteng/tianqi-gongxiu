@@ -1,5 +1,7 @@
 import {
   WENJUAN_2026_ORDER_TYPE,
+  WENJUAN_ADVANCED_CAMP_ORDER_TYPE,
+  WENJUAN_CAMP_ORDER_TYPE,
   WENJUAN_ORDER_PAY_CHANNEL_WEB,
   WENJUAN_ORDER_STATUS_UNPAID,
 } from './lead2026';
@@ -25,22 +27,81 @@ export function computeWenjuanDingdanAmountFields(amountYuan: number): {
   };
 }
 
-export function buildWenjuan2026DingdanInsertInput(amountYuan: number): Record<string, unknown> {
+export function buildWenjuanDingdanInsertInput(
+  orderType: string,
+  amountYuan: number,
+  serviceSpecialistId?: string | null,
+  userLibraryId?: string | number | null,
+  orderRemark?: string
+): Record<string, unknown> {
   const amounts = computeWenjuanDingdanAmountFields(amountYuan);
+  const specialistId =
+    serviceSpecialistId && /^\d+$/.test(serviceSpecialistId.trim())
+      ? Number(serviceSpecialistId.trim())
+      : null;
+  const targetUserLibraryId =
+    userLibraryId !== null &&
+    userLibraryId !== undefined &&
+    /^\d+$/.test(String(userLibraryId).trim())
+      ? Number(String(userLibraryId).trim())
+      : null;
   return {
-    ud_dingdanbeizhu_439d3a: WENJUAN_2026_ORDER_TYPE,
+    ud_dingdanbeizhu_439d3a: orderRemark?.trim() || orderType,
     ...amounts,
     ud_dingdanleixing_3ade69: WENJUAN_ORDER_STATUS_UNPAID,
-    ud_dingdanleixing_3fb8b8: WENJUAN_2026_ORDER_TYPE,
+    ud_dingdanleixing_3fb8b8: orderType,
     ud_fanganid_xueyuanfangan_614f26: null,
     ud_fanganxufeiriqi_4918a8: null,
-    ud_jihuoshilianjiezhuanyuanid_902b22: null,
+    ud_jihuoshilianjiezhuanyuanid_902b22: specialistId,
     ud_kecheng002ffangan002fjihuomaid_c16115: null,
     ud_kechengbaomingshujuid_kechengbaomingshuju_0b3b6d: null,
     ud_shifoukaitongfuwuzhuanyuanshenfen_684472: false,
     ud_suijima_5b358e: null,
     ud_tuikuanzhuangtai_4208c0: null,
-    ud_yonghuxinxi_yonghuku_55773d: null,
+    ud_yonghuxinxi_yonghuku_55773d: targetUserLibraryId,
     ud_zhifufangshi_f2b896: WENJUAN_ORDER_PAY_CHANNEL_WEB,
   };
+}
+
+export function buildWenjuan2026DingdanInsertInput(
+  amountYuan: number,
+  serviceSpecialistId?: string | null,
+  userLibraryId?: string | number | null
+): Record<string, unknown> {
+  return buildWenjuanDingdanInsertInput(
+    WENJUAN_2026_ORDER_TYPE,
+    amountYuan,
+    serviceSpecialistId,
+    userLibraryId
+  );
+}
+
+export function buildWenjuanCamp2026DingdanInsertInput(
+  amountYuan: number,
+  serviceSpecialistId?: string | null,
+  userLibraryId?: string | number | null,
+  orderRemark?: string
+): Record<string, unknown> {
+  return buildWenjuanDingdanInsertInput(
+    WENJUAN_CAMP_ORDER_TYPE,
+    amountYuan,
+    serviceSpecialistId,
+    userLibraryId,
+    orderRemark
+  );
+}
+
+export function buildWenjuanAdvancedCamp2026DingdanInsertInput(
+  amountYuan: number,
+  serviceSpecialistId?: string | null,
+  userLibraryId?: string | number | null,
+  orderRemark?: string
+): Record<string, unknown> {
+  return buildWenjuanDingdanInsertInput(
+    WENJUAN_ADVANCED_CAMP_ORDER_TYPE,
+    amountYuan,
+    serviceSpecialistId,
+    userLibraryId,
+    orderRemark
+  );
 }

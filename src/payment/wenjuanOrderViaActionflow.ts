@@ -28,8 +28,35 @@ export function wenjuanOrderCreateActionFlowVersionId(): number {
  * VITE_WENJUAN_ORDER_CREATE_FLOW_ARGS_JSON 提供静态字段（会与下列字段合并，下列字段优先覆盖同名键）。
  */
 export function buildWenjuanOrderActionFlowArgs(): Record<string, unknown> {
-  const amount = wenjuanPayAmountYuanAsNumber();
+  return buildWenjuanOrderActionFlowArgsFor({
+    amountYuan: wenjuanPayAmountYuanAsNumber(),
+    orderType: WENJUAN_2026_ORDER_TYPE,
+    description: wenjuanPayDescription(),
+    wenjuanTag: '2026引流问卷',
+  });
+}
+
+export function buildWenjuanOrderActionFlowArgsFor(options: {
+  amountYuan: number;
+  orderType: string;
+  description: string;
+  wenjuanTag: string;
+  orderRemark?: string;
+  serviceSpecialistId?: string | null;
+  userLibraryId?: string | number | null;
+}): Record<string, unknown> {
+  const amount = options.amountYuan;
   const amountFen = Math.round(amount * 100);
+  const specialistId =
+    options.serviceSpecialistId && /^\d+$/.test(options.serviceSpecialistId.trim())
+      ? Number(options.serviceSpecialistId.trim())
+      : null;
+  const targetUserLibraryId =
+    options.userLibraryId !== null &&
+    options.userLibraryId !== undefined &&
+    /^\d+$/.test(String(options.userLibraryId).trim())
+      ? Number(String(options.userLibraryId).trim())
+      : null;
   let extra: Record<string, unknown> = {};
   const raw = import.meta.env.VITE_WENJUAN_ORDER_CREATE_FLOW_ARGS_JSON?.trim();
   if (raw) {
@@ -46,9 +73,18 @@ export function buildWenjuanOrderActionFlowArgs(): Record<string, unknown> {
     ...extra,
     amount_yuan: amount,
     amount_fen: amountFen,
-    order_type: WENJUAN_2026_ORDER_TYPE,
-    description: wenjuanPayDescription(),
-    wenjuan_tag: '2026引流问卷',
+    order_type: options.orderType,
+    order_remark: options.orderRemark ?? options.orderType,
+    dingdan_beizhu: options.orderRemark ?? options.orderType,
+    ud_dingdanbeizhu_439d3a: options.orderRemark ?? options.orderType,
+    description: options.description,
+    wenjuan_tag: options.wenjuanTag,
+    ref: specialistId,
+    service_specialist_id: specialistId,
+    ud_jihuoshilianjiezhuanyuanid_902b22: specialistId,
+    user_library_id: targetUserLibraryId,
+    yonghuku_id: targetUserLibraryId,
+    ud_yonghuxinxi_yonghuku_55773d: targetUserLibraryId,
   };
 }
 

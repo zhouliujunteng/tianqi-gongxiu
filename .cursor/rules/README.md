@@ -8,7 +8,7 @@
 
 ## 🎯 本仓库提供的内容
 
-本仓库包含 **12 个专业 Rules 文件**：
+本仓库包含 **14 个专业 Rules 文件**：
 
 1. **理解 Zion 的架构** - 后端结构、GraphQL 端点、身份验证
 2. **查询和变更数据库** - 从数据模型自动生成的 GraphQL schema
@@ -22,10 +22,12 @@
 10. **Zeabur 部署规范** - 在 Zeabur 平台部署 React + TypeScript + Vite 项目的最佳实践
 11. **微信小程序开发** - 微信小程序与 Zion 后端集成的特有规则和最佳实践
 12. **微信小程序支付** - 微信小程序中使用 Zion 后端进行微信支付的方法
+13. **微信内 H5 登录** - 微信内置浏览器网页授权与 `loginWithWechat`（Zion JWT）
+14. **微信内 H5 JSAPI 支付** - `createWechatPayment` + `WeixinJSBridge` 调起微信支付
 
 ## 📦 包含的 Rules 文件
 
-本仓库包含 **12 个 Rules 文件**，均为 `.mdc` 格式（Markdown with YAML frontmatter），位于仓库根目录：
+本仓库包含 **14 个 Rules 文件**，均为 `.mdc` 格式（Markdown with YAML frontmatter），位于仓库根目录：
 
 ```
 zion-aicoding-rules/
@@ -40,7 +42,9 @@ zion-aicoding-rules/
 ├── ui-design-rules.mdc                   # UI 设计规范（有机/自然风格）
 ├── zeabur-deployment-rules.mdc           # Zeabur 平台部署规范
 ├── wechat-miniprogram-rules.mdc         # 微信小程序开发规则
-└── wechat-miniprogram-payment-rules.mdc  # 微信小程序支付规则
+├── wechat-miniprogram-payment-rules.mdc  # 微信小程序支付规则
+├── wechat-inapp-browser-oauth-login.mdc  # 微信内 H5 网页授权与 loginWithWechat
+└── wechat-inapp-browser-jsapi-payment.mdc # 微信内 H5 JSAPI 支付（WeixinJSBridge）
 ```
 
 所有 Rules 文件都包含 YAML frontmatter 元数据（`description` 和 `alwaysApply`），会被 Cursor 正确识别和应用。
@@ -349,6 +353,35 @@ query GetPostsWithAuthors($limit: Int) {
 * 小程序中的虚拟商品支付
 * 小程序中的会员充值
 
+### 13. `wechat-inapp-browser-oauth-login`
+
+**用途**：微信内置浏览器中的网页授权登录，并与 Zion `loginWithWechat` 对接  
+**教 AI**：
+* 公众号 `oauth2/authorize` 跳转与 `redirect_uri` 编码
+* 从 URL（query / hash）解析 `code`、`state` 与消费前 strip 参数
+* 调用 `loginWithWechat` 换取 Zion JWT，禁止在前端使用 appsecret
+* `VITE_ZION_WECHAT_OAUTH_URL` 与公众号兜底模板（勿与 PC `qrconnect` 混用）
+* `pageshow` / bfcache 场景下换票重试思路
+
+**两条硬约束**（仅描述登录本身，与是否做支付无关）：
+* 须在**微信内置浏览器**内完成授权链
+* 公众平台 AppID、回调域名与 Zion 微信登录配置一致
+
+### 14. `wechat-inapp-browser-jsapi-payment`
+
+**用途**：微信内置浏览器 H5 通过 Zion `createWechatPayment` 与 `WeixinJSBridge` 发起 JSAPI 支付  
+**教 AI**：
+* 订单表绑定、商户配置与带 JWT 调用 `createWechatPayment`
+* `PaymentType` 以项目 Schema 为准（多项目下微信内 JSAPI 常与 `WECHATPAY_MINIPROGRAM` 共用枚举名）
+* 解析 `message` JSON 并 `invoke('getBrandWCPayRequest', …)`
+* 支付成功后延迟查询 `fz_payment_record` / 订单（webhook 异步）
+* `amount` 元、分、字符串与 `total_fee` 后端约定及环境变量变通
+
+**三条硬约束**：
+* 须在**微信内置浏览器**中调起 JSAPI（`WeixinJSBridgeReady`）
+* 公众平台微信支付与商户号须在 Zion 正确绑定
+* 必须先完成微信登录（规则 13）再请求支付
+
 ## 💡 使用示例
 
 ### 示例 1: 使用 AI 助手构建博客（Web 应用）
@@ -392,6 +425,8 @@ Rules 可以智能地协同工作。例如：
 * `zion-actionflow-gql-api` → 多步骤帖子创建工作流
 * `zion-payment` → 支付宝支付（Web）
 * `wechat-miniprogram-payment` → 微信支付（小程序）
+* `wechat-inapp-browser-oauth-login` → 微信内 H5 授权登录（Zion JWT）
+* `wechat-inapp-browser-jsapi-payment` → 微信内 H5 JSAPI 支付
 * `zion-ai-agent-gql-api` → AI 驱动的内容审核
 
 ### 微信小程序开发工作流

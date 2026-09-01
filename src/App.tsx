@@ -10,9 +10,14 @@ import {
 } from './auth/wechatOAuthCallback';
 import { consumeJwtFromUrl, getZionJwt, setZionJwt } from './auth/zionJwt';
 import { createApolloClient, isZionConfigured } from './apollo/client';
+import { LoggedInUserWatermark } from './components/LoggedInUserWatermark';
 import { OrganicBackgroundBlobs } from './components/OrganicBackgroundBlobs';
 import { LOGIN_WITH_WECHAT } from './graphql/operations';
+import { Lead2026AdvancedCampEnrollPage } from './pages/Lead2026AdvancedCampEnrollPage';
+import { Lead2026CampEnrollPage } from './pages/Lead2026CampEnrollPage';
+import { Lead2026ChargeEnrollPage } from './pages/Lead2026ChargeEnrollPage';
 import { Lead2026Page } from './pages/Lead2026Page';
+import { getZionJwtUserId } from './auth/zionJwt';
 import { friendlyRequestErrorMessage } from './utils/friendlyRequestError';
 
 function oauthFailureMessage(error: unknown): string {
@@ -23,8 +28,87 @@ function oauthFailureMessage(error: unknown): string {
   return friendlyRequestErrorMessage(error);
 }
 
+function shouldOpenCampPage(): boolean {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    return (
+      params.get('scene') === 'camp' ||
+      params.get('page') === 'camp' ||
+      params.get('tab') === 'camp'
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** 执行充电·线上共学（免费学员专享课，官方链接不带邀请 ref） */
+function shouldOpenChargePage(): boolean {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    return (
+      params.get('scene') === 'charge' ||
+      params.get('page') === 'charge' ||
+      params.get('tab') === 'charge' ||
+      params.get('scene') === 'charge-session' ||
+      params.get('page') === 'charge-session' ||
+      params.get('tab') === 'charge-session'
+    );
+  } catch {
+    return false;
+  }
+}
+
+function shouldOpenAdvancedCampPage(): boolean {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    return (
+      params.get('scene') === 'advanced-camp' ||
+      params.get('page') === 'advanced-camp' ||
+      params.get('tab') === 'advanced-camp'
+    );
+  } catch {
+    return false;
+  }
+}
+
+function shouldOpenAdvancedCampPhase2Page(): boolean {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    return (
+      params.get('scene') === 'advanced-camp-phase2' ||
+      params.get('page') === 'advanced-camp-phase2' ||
+      params.get('tab') === 'advanced-camp-phase2' ||
+      params.get('scene') === 'advanced-camp-new' ||
+      params.get('page') === 'advanced-camp-new' ||
+      params.get('tab') === 'advanced-camp-new'
+    );
+  } catch {
+    return false;
+  }
+}
+
+function shouldOpenAdvancedCampPhase7Page(): boolean {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    return (
+      (params.get('scene') === 'camp' ||
+        params.get('page') === 'camp' ||
+        params.get('tab') === 'camp') &&
+      params.get('phase') === '7'
+    );
+  } catch {
+    return false;
+  }
+}
+
 export function App() {
   const client = useMemo(() => createApolloClient(), []);
+  const isCampPage = useMemo(() => shouldOpenCampPage(), []);
+  const isAdvancedCampPage = useMemo(() => shouldOpenAdvancedCampPage(), []);
+  const isAdvancedCampPhase2Page = useMemo(() => shouldOpenAdvancedCampPhase2Page(), []);
+  const isAdvancedCampPhase7Page = useMemo(() => shouldOpenAdvancedCampPhase7Page(), []);
+  const isChargePage = useMemo(() => shouldOpenChargePage(), []);
+  const loggedInUserId = getZionJwtUserId();
   const [, bump] = useState(0);
   const [wechatOAuthExchangePending, setWechatOAuthExchangePending] =
     useState(false);
@@ -101,6 +185,37 @@ export function App() {
     return () => window.removeEventListener('pageshow', onPageShow);
   }, []);
 
+  /** 微信内 URL 有时晚于首帧；从聊天打开带 ?ref= 的链接时补抓邀请人 */
+  useEffect(() => {
+    if (!isZionConfigured()) return;
+    const run = (): void => {
+      captureInviterRefFromUrl();
+    };
+    run();
+    window.addEventListener('popstate', run);
+    window.addEventListener('hashchange', run);
+    window.addEventListener('focus', run);
+    const onVis = (): void => {
+      if (document.visibilityState === 'visible') run();
+    };
+    document.addEventListener('visibilitychange', onVis);
+    window.addEventListener('pageshow', run);
+    let ticks = 0;
+    const tick = window.setInterval(() => {
+      run();
+      ticks += 1;
+      if (ticks >= 15) window.clearInterval(tick);
+    }, 1000);
+    return () => {
+      window.removeEventListener('popstate', run);
+      window.removeEventListener('hashchange', run);
+      window.removeEventListener('focus', run);
+      document.removeEventListener('visibilitychange', onVis);
+      window.removeEventListener('pageshow', run);
+      window.clearInterval(tick);
+    };
+  }, []);
+
   if (!isZionConfigured()) {
     return (
       <div className="relative z-10 mx-auto max-w-lg px-4 py-20">
@@ -123,10 +238,42 @@ export function App() {
     <ApolloProvider client={client}>
       <OrganicBackgroundBlobs />
       <div className="texture-overlay" aria-hidden />
-      <Lead2026Page
-        wechatOAuthExchangePending={wechatOAuthExchangePending}
-        wechatOAuthExchangeError={wechatOAuthExchangeError}
-      />
+      {isAdvancedCampPhase7Page ? (
+        <Lead2026AdvancedCampEnrollPage
+          courseVariant="phase7"
+          wechatOAuthExchangePending={wechatOAuthExchangePending}
+          wechatOAuthExchangeError={wechatOAuthExchangeError}
+        />
+      ) : isAdvancedCampPhase2Page ? (
+        <Lead2026AdvancedCampEnrollPage
+          courseVariant="phase2"
+          wechatOAuthExchangePending={wechatOAuthExchangePending}
+          wechatOAuthExchangeError={wechatOAuthExchangeError}
+        />
+      ) : isAdvancedCampPage ? (
+        <Lead2026AdvancedCampEnrollPage
+          wechatOAuthExchangePending={wechatOAuthExchangePending}
+          wechatOAuthExchangeError={wechatOAuthExchangeError}
+        />
+      ) : isCampPage ? (
+        <Lead2026CampEnrollPage
+          wechatOAuthExchangePending={wechatOAuthExchangePending}
+          wechatOAuthExchangeError={wechatOAuthExchangeError}
+        />
+      ) : isChargePage ? (
+        <Lead2026ChargeEnrollPage
+          wechatOAuthExchangePending={wechatOAuthExchangePending}
+          wechatOAuthExchangeError={wechatOAuthExchangeError}
+        />
+      ) : (
+        <Lead2026Page
+          wechatOAuthExchangePending={wechatOAuthExchangePending}
+          wechatOAuthExchangeError={wechatOAuthExchangeError}
+        />
+      )}
+      {(isCampPage || isAdvancedCampPage || isChargePage) && loggedInUserId ? (
+        <LoggedInUserWatermark userId={loggedInUserId} />
+      ) : null}
     </ApolloProvider>
   );
 }

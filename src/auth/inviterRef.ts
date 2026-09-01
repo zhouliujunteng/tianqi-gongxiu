@@ -4,6 +4,33 @@ const LOCAL_KEY = 'tqwj_inviter_yonghuku_id_ls';
 
 /** 微信 OAuth state 携带邀请人；需与 captureInviterRefFromOAuthState 一致 */
 const OAUTH_STATE_PREFIX = 'tqwj_r_';
+const URL_PARAM_CANDIDATES = ['yaoqingren_id', 'ref'] as const;
+
+function readInviterFromSearch(search: string): string | null {
+  try {
+    const params = new URLSearchParams(search);
+    for (const key of URL_PARAM_CANDIDATES) {
+      const v = params.get(key)?.trim();
+      if (v && /^\d+$/.test(v)) return v;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 仅从地址栏读取（pathname 后的 ?query，以及 hash 片段里的 ?query），不含本地存储。
+ * 部分宿主会把参数放在 # 后；微信内偶发 search 更新晚于首帧，提交前也会再读此处。
+ */
+export function readInviterRefFromAddressBarOnly(): string | null {
+  const fromSearch = readInviterFromSearch(window.location.search);
+  if (fromSearch) return fromSearch;
+  const { hash } = window.location;
+  if (!hash || !hash.includes('?')) return null;
+  const qStart = hash.indexOf('?');
+  return readInviterFromSearch(hash.slice(qStart));
+}
 
 function persistInviterRef(ref: string): void {
   if (!/^\d+$/.test(ref)) return;
@@ -23,14 +50,8 @@ function persistInviterRef(ref: string): void {
  * 从地址栏 ?ref=用户库主键id 写入存储（需在 JWT 消费清 query 之前调用）。
  */
 export function captureInviterRefFromUrl(): void {
-  try {
-    const ref = new URLSearchParams(window.location.search).get('ref')?.trim();
-    if (ref && /^\d+$/.test(ref)) {
-      persistInviterRef(ref);
-    }
-  } catch {
-    /* ignore */
-  }
+  const ref = readInviterRefFromAddressBarOnly();
+  if (ref) persistInviterRef(ref);
 }
 
 /**
@@ -74,8 +95,8 @@ export function appendWechatOAuthStateForInviter(
 /** 纯读取（可在 render 中调用）：先当前 URL，再本地存储 */
 export function getInviterYonghukuId(): string | null {
   try {
-    const fromUrl = new URLSearchParams(window.location.search).get('ref')?.trim();
-    if (fromUrl && /^\d+$/.test(fromUrl)) return fromUrl;
+    const fromUrl = readInviterRefFromAddressBarOnly();
+    if (fromUrl) return fromUrl;
     const s = sessionStorage.getItem(SESSION_KEY)?.trim();
     if (s && /^\d+$/.test(s)) return s;
     const l = localStorage.getItem(LOCAL_KEY)?.trim();

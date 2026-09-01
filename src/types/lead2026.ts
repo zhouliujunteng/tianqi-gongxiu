@@ -43,9 +43,35 @@ export interface BrandLogoQueryData {
 }
 
 export interface WenjuanPayEligibilityData {
-  fz_payment_record: { id: string | number; status: string | null }[];
+  fz_payment_record: {
+    id: string | number;
+    status: string | null;
+    type: string | null;
+    description: string | null;
+  }[];
 }
 
-export interface MyLead2026ExistsData {
-  ud_wenjuanshouji_2026yinliu_cb3e5d: { id: string | number }[];
+export interface AdvancedCampPreviousPaymentByUserLibraryData {
+  fz_payment_record: Array<{
+    id: string | number;
+    status: string | null;
+    description: string | null;
+    order: {
+      id: string | number;
+      ud_dingdanbeizhu_439d3a: string | null;
+      ud_dingdanjine_a50087: string | null;
+      ud_dingdanjine0028zhengshu0029_1070ec: number | null;
+    } | null;
+  }>;
+}
+
+export interface MyLead2026Item {
+  id: string | number;
+  created_at: string | null;
+  ud_shoujineirong_3bc0b9: Record<string, unknown> | null;
+  ud_chubufangan_094122: Record<string, unknown> | null;
+}
+
+export interface MyLead2026ListData {
+  ud_wenjuanshouji_2026yinliu_cb3e5d: MyLead2026Item[];
 }

@@ -37,7 +37,7 @@ import {
 import { friendlyRequestErrorMessage } from '../utils/friendlyRequestError';
 
 type Props = {
-  /** 当前登录 Zion 帐户 `account.id`（订单表用户库外键列在 insert 中为 null，资格靠 fz_payment_record） */
+  /** 当前登录 Zion 帐户 `account.id`（订单表用户库外键列在 insert 中为 null；已付资格查 fz_payment_record：帐户+SUCCESSFUL+微信 type） */
   accountId: string | null;
   onPaidMarked?: () => void;
   /**
@@ -45,12 +45,6 @@ type Props = {
    * 返回 true 时才写入前端「已付」标记。
    */
   confirmPaidWithBackend?: () => Promise<boolean>;
-};
-
-type PayDebugEntry = {
-  time: string;
-  stage: string;
-  payload?: unknown;
 };
 
 function parseOrderIdFromInsert(
@@ -61,15 +55,6 @@ function parseOrderIdFromInsert(
   return String(id);
 }
 
-function formatDebugPayload(payload: unknown): string {
-  if (payload === undefined) return '';
-  try {
-    return JSON.stringify(payload, null, 2);
-  } catch {
-    return String(payload);
-  }
-}
-
 export function WenjuanWechatPayCard({
   accountId,
   onPaidMarked,
@@ -77,7 +62,6 @@ export function WenjuanWechatPayCard({
 }: Props) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [debugEntries, setDebugEntries] = useState<PayDebugEntry[]>([]);
   const [insertDingdan] = useMutation(INSERT_WENJUAN_2026_DINGDAN);
   const [invokeOrderFlow] = useMutation(INVOKE_WENJUAN_ORDER_CREATE_FLOW);
   const [patchDingdanAmounts] = useMutation(PATCH_WENJUAN_2026_DINGDAN_AMOUNTS);
@@ -88,15 +72,6 @@ export function WenjuanWechatPayCard({
   const description = wenjuanPayDescription();
   const weixin = isWeixinBrowser();
   const payType = wenjuanPayPaymentType(weixin);
-
-  const appendDebug = useCallback((stage: string, payload?: unknown) => {
-    const entry: PayDebugEntry = {
-      time: new Date().toLocaleTimeString('zh-CN', { hour12: false }),
-      stage,
-      payload,
-    };
-    setDebugEntries((prev) => [...prev.slice(-29), entry]);
-  }, []);
 
   const markPaidOk = useCallback(() => {
     try {
@@ -109,17 +84,8 @@ export function WenjuanWechatPayCard({
 
   const runPay = useCallback(async () => {
     setErr(null);
-    setDebugEntries([]);
-    appendDebug('点击支付按钮', {
-      accountId,
-      payType,
-      amount,
-      amountForCreatePay,
-      description,
-    });
     if (!accountId) {
       setErr('未获取到当前登录帐户编号，请重新登录后再试。');
-      appendDebug('支付中断：缺少 accountId');
       return;
     }
     setBusy(true);
@@ -138,11 +104,6 @@ export function WenjuanWechatPayCard({
           versionId: wenjuanOrderCreateActionFlowVersionId(),
           args: flowArgs,
         });
-        appendDebug('调用前：InvokeWenjuanOrderCreateFlow', {
-          actionFlowId: flowId,
-          versionId: wenjuanOrderCreateActionFlowVersionId(),
-          args: flowArgs,
-        });
         const flowRes = await invokeOrderFlow({
           variables: {
             actionFlowId: flowId,
@@ -151,10 +112,6 @@ export function WenjuanWechatPayCard({
           },
         });
         logWenjuanPayRequest('mutation InvokeWenjuanOrderCreateFlow · 响应', {
-          data: flowRes.data,
-          errors: flowRes.errors,
-        });
-        appendDebug('调用后：InvokeWenjuanOrderCreateFlow', {
           data: flowRes.data,
           errors: flowRes.errors,
         });
@@ -174,17 +131,10 @@ export function WenjuanWechatPayCard({
         logWenjuanPayRequest('mutation InsertWenjuan2026Dingdan · variables', {
           object: insertObject,
         });
-        appendDebug('调用前：InsertWenjuan2026Dingdan', {
-          object: insertObject,
-        });
         const insertRes = await insertDingdan({
           variables: { object: insertObject },
         });
         logWenjuanPayRequest('mutation InsertWenjuan2026Dingdan · 响应', {
-          data: insertRes.data,
-          errors: insertRes.errors,
-        });
-        appendDebug('调用后：InsertWenjuan2026Dingdan', {
           data: insertRes.data,
           errors: insertRes.errors,
         });
@@ -201,18 +151,10 @@ export function WenjuanWechatPayCard({
             id: orderIdStr,
             set: amtSet,
           });
-          appendDebug('调用前：PatchWenjuan2026DingdanAmounts', {
-            id: orderIdStr,
-            set: amtSet,
-          });
           const patchRes = await patchDingdanAmounts({
             variables: { id: orderIdStr, set: amtSet },
           });
           logWenjuanPayRequest('mutation PatchWenjuan2026DingdanAmounts · 响应', {
-            data: patchRes.data,
-            errors: patchRes.errors,
-          });
-          appendDebug('调用后：PatchWenjuan2026DingdanAmounts', {
             data: patchRes.data,
             errors: patchRes.errors,
           });
@@ -233,7 +175,6 @@ export function WenjuanWechatPayCard({
         type: payType,
       };
       logWenjuanPayRequest('mutation CreateWechatPayment · variables', createPayVariables);
-      appendDebug('调用前：CreateWechatPayment', createPayVariables);
       const payRes = await createPay({
         variables: createPayVariables,
       });
@@ -250,11 +191,6 @@ export function WenjuanWechatPayCard({
                 typeof msg === 'string' ? `${msg.slice(0, 160)}${msg.length > 160 ? '…' : ''}` : msg,
             }
           : null,
-      });
-      appendDebug('调用后：CreateWechatPayment', {
-        data: payRes.data,
-        errors: payRes.errors,
-        sign,
       });
       if (payRes.errors?.length) {
         throw new Error(payRes.errors.map((e) => e.message).join('；'));
@@ -289,9 +225,7 @@ export function WenjuanWechatPayCard({
         payload.kind === 'jsapi' && !payload.params.total_fee
           ? { ...payload.params, total_fee: fen }
           : payload.params;
-      appendDebug('调用前：WeixinJSBridge.invoke(getBrandWCPayRequest)', jsapiParams);
       invokeWechatJsapiPay(jsapiParams, (ok, msg) => {
-        appendDebug('调用后：WeixinJSBridge 回调', { ok, msg: msg ?? '' });
         if (!ok) {
           setBusy(false);
           if (msg) setErr(msg);
@@ -305,7 +239,7 @@ export function WenjuanWechatPayCard({
                 markPaidOk();
               } else {
                 setErr(
-                  '微信已提示支付成功，但后台尚未登记到账（通常几秒内完成）。请稍候点击本页相关「重试/刷新」或重新进入页面。'
+                  '微信已提示支付成功。本页会每隔几秒自动向 Zion 同步支付结果；若后台已显示成功，通常很快会自动进入问卷。也可稍候下拉刷新或重新打开本页。'
                 );
               }
             } else {
@@ -319,13 +253,11 @@ export function WenjuanWechatPayCard({
         })();
       });
     } catch (e) {
-      appendDebug('支付异常', { error: friendlyRequestErrorMessage(e) });
       setErr(friendlyRequestErrorMessage(e));
     } finally {
       if (clearBusyInFinally) setBusy(false);
     }
   }, [
-    appendDebug,
     accountId,
     insertDingdan,
     invokeOrderFlow,
@@ -353,10 +285,7 @@ export function WenjuanWechatPayCard({
       <h2 className="font-display text-lg text-primary">微信支付</h2>
       <p className="mt-2 text-sm text-muted-foreground leading-relaxed">
         金额：<span className="font-semibold text-foreground">¥{amount.toFixed(2)}</span>
-        。
-        {wenjuanOrderCreateUsesActionflow()
-          ? '将通过与小程序相同的行为流创建支付订单，再调起 Zion 微信支付（请保证行为流写入的是支付设置里绑定的订单表）。'
-          : '将先用 GraphQL 在订单表插入「2026引流问卷」未支付订单（用户库关联列为空），再调起 Zion 微信支付。若小程序用行为流建单，请配置 VITE_WENJUAN_ORDER_CREATE_ACTION_FLOW_ID 与小程序一致。'}
+        。点击下方按钮即可发起支付。
         {!weixin ? (
           <span className="mt-1 block">
             当前非微信内置浏览器：将使用 Zion 的 WECHATPAY_MOBILE_WEB（H5）。若报错，请在{' '}
@@ -388,36 +317,6 @@ export function WenjuanWechatPayCard({
             我已完成支付
           </button>
         ) : null}
-      </div>
-      <div className="mt-4 rounded-2xl border border-border/70 bg-background/60 p-4">
-        <div className="mb-2 flex items-center justify-between gap-2">
-          <h3 className="text-sm font-semibold text-foreground">支付调试信息（调用前/后）</h3>
-          <button
-            type="button"
-            className="rounded-full border border-border px-3 py-1 text-xs text-muted-foreground hover:bg-muted/50"
-            onClick={() => setDebugEntries([])}
-          >
-            清空
-          </button>
-        </div>
-        <div className="max-h-56 overflow-auto rounded-xl border border-border/60 bg-[#FEFEFA] p-3 text-xs">
-          {debugEntries.length === 0 ? (
-            <p className="text-muted-foreground">点击「微信支付」后，这里会显示每一步请求与响应。</p>
-          ) : (
-            debugEntries.map((item, idx) => (
-              <div key={`${item.time}-${idx}`} className="mb-3 last:mb-0">
-                <p className="font-medium text-foreground">
-                  [{item.time}] {item.stage}
-                </p>
-                {item.payload !== undefined ? (
-                  <pre className="mt-1 whitespace-pre-wrap break-all text-[11px] text-muted-foreground">
-                    {formatDebugPayload(item.payload)}
-                  </pre>
-                ) : null}
-              </div>
-            ))
-          )}
-        </div>
       </div>
     </section>
   );

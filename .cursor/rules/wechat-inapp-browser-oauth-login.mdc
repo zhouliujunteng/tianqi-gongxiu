@@ -1,0 +1,116 @@
+---
+description: "WeChat in-app browser (H5) OAuth login with Zion loginWithWechat. Use when: (1) Building WeChat web auth redirect flow, (2) Parsing code/state from URL after oauth2/authorize, (3) Calling loginWithWechat mutation, (4) Configuring VITE_ZION_WECHAT_OAUTH_URL, (5) Handling bfcache/pageshow after OAuth"
+alwaysApply: false
+applyToFiles:
+  - "**/src/auth/**"
+  - "**/src/App.tsx"
+  - "**/constants/wechatOAuth.ts"
+---
+
+# 微信内置浏览器：网页授权登录（Zion）
+
+## 概述
+
+在**微信内置浏览器**中打开 H5 页面时，可使用微信公众平台 **OAuth2.0 网页授权**获取临时 `code`，再调用 Zion GraphQL **`loginWithWechat`**，由 **Zion 服务端**完成与微信的换票、用户识别/注册，并返回 **Zion 业务 JWT**。
+
+**安全原则 [MUST]**：前端**只传递**微信返回的 `code`；**不得**在浏览器使用或暴露微信 `appsecret`；**不得**在前端自行用 `code` 换 `access_token`（由 Zion 完成）。
+
+**本仓库补充**：若 Zion / 网关配置为回跳 URL **直接携带 JWT**（query 或 hash 中的 `token` / `jwt` 等），入口会在 OAuth `code` 分支**之前**执行 `consumeJwtFromUrl()` 写入 `localStorage` 并清理 URL（见 `src/auth/zionJwt.ts`、`src/App.tsx`）。与 `code` 换票二选一、可并存于不同部署，**不必**经过 `loginWithWechat`。
+
+## 两条硬约束
+
+网页授权登录**本身**须满足（与是否接入支付无关）：
+
+1. **必须在微信内置浏览器中完成授权跳转链**  
+   公众号网页授权（`open.weixin.qq.com/connect/oauth2/authorize`）面向微信内打开；系统浏览器或外链环境无法复用同一套体验，且易导致回调/域名配置不匹配。
+
+2. **公众平台与 Zion 配置必须一致**  
+   授权链接中的 **AppID**、微信公众平台配置的 **授权回调域名**、Zion 项目内 **微信登录 / 开放平台** 对接配置须一致，否则 `loginWithWechat` 无法校验 `code`。
+
+## Zion GraphQL
+
+使用项目已暴露的 mutation（变量名以 Schema 为准）：
+
+```graphql
+mutation LoginWithWechat($code: String!, $createIfNotExists: Boolean!) {
+  loginWithWechat(code: $code, createIfNotExists: $createIfNotExists) {
+    account {
+      id
+      username
+    }
+    jwt {
+      token
+    }
+  }
+}
+```
+
+**关键点 [MUST]**：
+
+- 使用 OAuth 回跳得到的 **`code`**（一次性）；`createIfNotExists: true` 表示允许首次授权时创建账户（按产品需求可改为 `false`）。
+- 成功后将 **`jwt.token`** 存为应用会话（如 localStorage），后续 Apollo `Authorization: Bearer <token>` 调用受保护接口。
+- 首次换票请求通常以 **匿名 GraphQL 角色**即可；以项目权限策略为准。
+
+## 前端必做事项
+
+### 1. 解析回跳参数
+
+微信回跳通常在 **`?code=...&state=...`**；少数网关或历史配置会把参数放在 **hash** 中。须同时解析 `location.search` 与 `location.hash` 内的 query 段，避免漏掉 `code`。
+
+**参考实现（本仓库）**：`src/auth/wechatOAuthCallback.ts` — `getWechatOAuthCodeFromLocation`。
+
+### 2. 消费 code 前清理地址栏
+
+在发起 `loginWithWechat` **之前**从 URL 中移除 `code`、`state`（`history.replaceState`），防止用户刷新或分享链接导致 **code 重复使用**而失败。
+
+**参考实现**：`src/auth/wechatOAuthCallback.ts` — `stripWechatOAuthParamsFromLocation`。
+
+### 3. 构建授权 URL
+
+- **`redirect_uri`** 必须为回跳页的**完整 URL**（含 path、query；若业务参数在 hash 中，应一并包含），且 **UTF-8 后做一次 encode**，作为微信授权 URL 的参数。
+- 推荐在环境变量中配置**模板 URL**，使用占位符 **`{REDIRECT}`** 替换为编码后的回跳地址，避免手写拼接错误。
+- 可在 **`state`** 中携带短业务上下文（如邀请人 ID）；回跳后解析并落库或写入 session；注意 **长度与字符**符合微信限制。
+
+**参考实现**：`src/auth/wechatLoginUrl.ts` — `buildWechatOAuthRedirectUrl`、`buildWechatOAuthUrlForWeixinBrowser`；邀请人 state 见 `src/auth/inviterRef.ts`。
+
+### 4. 微信内授权入口
+
+使用 `<a href="...">` 跳转至授权页（或 `location.href`），确保在用户手势或明确流程中进入授权，避免被浏览器策略拦截。
+
+### 5. bfcache / 返回前台
+
+从微信授权页返回时，部分 WebView 会走 **Page Transition `pageshow` + `persisted`**。若 URL 仍带 `code` 且本地尚无 JWT，可 **`window.location.reload()`** 触发重新执行换票逻辑（按项目实际防重入策略调整）。
+
+**参考实现**：`src/App.tsx` 中 `pageshow` 监听。
+
+## 环境变量
+
+- **`VITE_ZION_WECHAT_OAUTH_URL`**（推荐）：由 Zion / 运维提供的完整授权页模板，须含公众号 **`oauth2/authorize`** 形态；支持 `{REDIRECT}` 替换编码后的 `redirect_uri`。
+- **兜底**：若未配置，本地兜底模板**必须**是**公众号**网页授权，**勿**将开放平台 **`qrconnect`（扫码 PC）**误用作微信内 H5 主链路。
+
+**参考**：`src/constants/wechatOAuth.ts`。
+
+## 本仓库参考路径
+
+| 职责 | 路径 |
+|------|------|
+| 换票与 JWT 写入 | `src/App.tsx` |
+| OAuth URL 构建 | `src/auth/wechatLoginUrl.ts` |
+| code/state 解析与 strip | `src/auth/wechatOAuthCallback.ts` |
+| GraphQL 定义 | `src/graphql/operations.ts` — `LOGIN_WITH_WECHAT` |
+| URL 直传 JWT（可选） | `src/auth/zionJwt.ts` — `consumeJwtFromUrl` |
+
+## 交叉引用
+
+- `zion-backend-architecture.mdc` — GraphQL 端点、鉴权方式
+- `zion-development-best-practices.mdc` — 错误提示、Apollo 配置
+- `wechat-inapp-browser-jsapi-payment.mdc` — 仅当业务需要微信内支付时查阅（**谁必须先登录属于支付/业务规则**，不在本登录规则中规定）
+
+## 代码生成检查清单 [MUST]
+
+- [ ] 仅使用 `loginWithWechat` 交换 `code`，不在前端处理 appsecret
+- [ ] 解析 `code` 支持 query 与 hash
+- [ ] 发起 mutation 前 `strip` URL 中的 `code`/`state`
+- [ ] `redirect_uri` 完整且经 encode；与公众平台回调域名一致
+- [ ] 微信内使用公众号 `oauth2/authorize` 模板，而非误用 PC 扫码链
+- [ ] 用户可见的失败原因（GraphQL errors / 网络错误）

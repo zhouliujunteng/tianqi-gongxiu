@@ -1,0 +1,137 @@
+---
+description: "WeChat in-app browser JSAPI pay via Zion createWechatPayment and WeixinJSBridge. Use when: (1) H5 inside WeChat paying with getBrandWCPayRequest, (2) Choosing PaymentType for in-app vs MWEB, (3) Parsing createWechatPayment message JSON, (4) Order table + merchant binding, (5) Delayed post-pay status query, (6) amount/total_fee BigDecimal pitfalls"
+alwaysApply: false
+applyToFiles:
+  - "**/src/payment/**"
+  - "**/src/components/WenjuanWechatPayCard.tsx"
+  - "**/src/constants/wenjuanPayment.ts"
+  - "**/src/graphql/operations.ts"
+---
+
+# 微信内置浏览器：JSAPI 微信支付（Zion）
+
+## 概述
+
+在微信内置浏览器中打开的 **H5 页面**发起支付时，应使用微信 **JSAPI 收银台**（`WeixinJSBridge.invoke('getBrandWCPayRequest', …)`）。Zion 侧通过 GraphQL **`createWechatPayment`** 返回预下单结果；`status === 'SUCCESS'` 时，**`message`** 字段为 **JSON 字符串**（或需解析的文本），内含 `appId`、`timeStamp`、`nonceStr`、`package`（`prepay_id=…`）、`signType`、`paySign` 等，供 JSAPI 调起。
+
+**与小程序的差异**：小程序使用 `wx.requestPayment`；微信内 H5 使用 **`WeixinJSBridge`**。两者支付参数形状类似，但运行环境不同。
+
+## 三条硬约束
+
+1. **必须在微信内置浏览器中调起支付**  
+   使用 **`MicroMessenger` UA** 判断微信环境；监听 **`WeixinJSBridgeReady`**（或已存在 `window.WeixinJSBridge`）后再 `invoke('getBrandWCPayRequest', …)`。非微信环境不应走 JSAPI；手机系统浏览器通常走 **H5 / MWEB**（如 `WECHATPAY_MOBILE_WEB`），见下文「与 MWEB 的区别」。
+
+2. **公众平台微信支付必须与微信商户号正确绑定**  
+   在 **Zion 编辑器**中完成：订单表绑定、微信支付 AppID、商户号、API 密钥/证书等。若商户与公众号/开放平台主体或绑定关系错误，预下单或调起会失败。
+
+3. **必须先完成微信登录**  
+   **`createWechatPayment` 请求必须携带当前用户的 Zion JWT**（如 Apollo `Authorization: Bearer`）。匿名或未登录用户不应直接调支付；应先完成 `wechat-inapp-browser-oauth-login.mdc` 中的 OAuth + **`loginWithWechat`**。
+
+## Zion 前置条件
+
+与 `zion-payment.mdc`、`wechat-miniprogram-payment.mdc` 一致：
+
+1. **订单表**：在 Zion 编辑器将业务订单表设为项目的「订单表」；每次支付关联 **`orderId`**。
+2. **微信支付配置**：在 Zion 完成密钥与证书等配置。
+3. **订单创建**：可先创建订单再调 `createWechatPayment`；涉及金额校验、库存等敏感逻辑时，优先 **Actionflow**，见 `zion-development-best-practices.mdc`。
+
+## GraphQL：`createWechatPayment`
+
+```graphql
+mutation CreateWechatPayment(
+  $orderId: Long!
+  $amount: BigDecimal!
+  $description: String!
+  $type: PaymentType!
+) {
+  createWechatPayment(
+    orderId: $orderId
+    amount: $amount
+    description: $description
+    type: $type
+  ) {
+    message
+    status
+  }
+}
+```
+
+**关键点 [MUST]**：
+
+- **`type`** 必须为当前项目 GraphQL 枚举 **`PaymentType`** 中**实际存在**的值。**不要**假设所有项目都有 `WECHATPAY_JSAPI` 等命名。
+- 在多个已验证的 Zion 项目中，**微信内 H5（JSAPI）**与小程序共用同一通道枚举名 **`WECHATPAY_MINIPROGRAM`**（历史命名：与小程序同属 JSAPI 调起）。**以你项目的 Schema 为准**；若不同，通过环境变量覆盖类型字符串。
+- **`status === 'SUCCESS'`** 时，将 **`message`** 解析为对象后交给 JSAPI；失败时 `message` 可能为错误说明文本。
+
+## 推荐流程
+
+1. 确认用户已登录（有效 Zion JWT）。
+2. **创建订单**（Actionflow 或 insert），得到 **`orderId`**。
+3. 调用 **`createWechatPayment`**，传入 `orderId`、`amount`、`description`、`type`（微信内一般为 `WECHATPAY_MINIPROGRAM` 或项目对应 JSAPI 枚举值）。
+4. 解析 **`message`**：本仓库使用 **`parseWechatPaymentMessage`**（`src/payment/parseWechatPaymentMessage.ts`）区分 **JSAPI** / **H5(`mweb_url`)** / 错误文案，而非裸 `JSON.parse`；得到 JSAPI 参数对象后再调 Bridge。
+5. **`WeixinJSBridge.invoke('getBrandWCPayRequest', { appId, timeStamp, nonceStr, package, signType, paySign, … }, callback)`**  
+   - 成功：`err_msg === 'get_brand_wcpay_request:ok'`  
+   - 取消：`get_brand_wcpay_request:cancel`  
+   - 其他：视为失败并展示 `err_msg`
+6. **少数实现**可能要求额外传入 **`total_fee`（字符串，单位：分）**；若 Zion 返回缺字段而后端又校验分，可在前端在确认与订单一致的前提下补齐（**谨慎**：须与后端约定一致）。
+
+**参考实现（本仓库）**：
+
+- JSAPI 封装：`src/payment/weixinBrowser.ts` — `invokeWechatJsapiPay`、`whenWeixinJSBridgeReady`
+- 解析 `message`：`src/payment/parseWechatPaymentMessage.ts`
+- 端到端卡片：`src/components/WenjuanWechatPayCard.tsx`
+- `PaymentType` 与金额工具：`src/constants/wenjuanPayment.ts`
+
+## 支付结果与异步通知
+
+**支付成功回调仅表示用户在微信侧完成操作**；**订单/支付最终状态以 Zion 服务端（含 webhook）为准**。
+
+**[MUST]** 在 `get_brand_wcpay_request:ok` 之后，须待 **webhook 落库**后再以服务端记录为准解锁权益。最小做法是 **首轮等待约 2～2.5 秒** 再查（与 `zion-payment.mdc`、小程序支付规则一致）。
+
+**本仓库实现**：`Lead2026Page` 中 `confirmPaidWithBackend` 对 `fz_payment_record` **轮询最多 10 次**，首轮等待 **`WENJUAN_PAY_WEBHOOK_WAIT_MS`（2500ms）**，后续间隔 **`WENJUAN_PAY_WEBHOOK_RETRY_WAIT_MS`（2000ms）**；另有用 `setInterval` / `visibilitychange` 辅助刷新资格（见 `src/pages/Lead2026Page.tsx`、`src/constants/wenjuanPayment.ts`）。
+
+**参考查询**：`WENJUAN_PAY_ELIGIBILITY`（`src/graphql/operations.ts`）。
+
+## 金额与 `total_fee` 常见坑
+
+- Zion 文档与实现中 **`amount` 常为 `BigDecimal`「元」**（如 `29.9` 或 `"29.90"`）；微信统一下单 **`total_fee` 为整型分**。若后端已做元→分转换，前端应传元；若未转换，可能出现「缺少/非法 total_fee」类错误。
+- **勿混用**：若使用「传分」的变通方式，须与后端一致；否则可能被当成「2990 元」级别错误。
+
+**本仓库项目级开关（示例，按需复制到其他项目）**：
+
+- `VITE_WENJUAN_CREATE_WECHAT_PAY_AMOUNT_AS_FEN=1` — `amount` 传整数分
+- `VITE_WENJUAN_CREATE_WECHAT_PAY_AMOUNT_AS_YUAN_STRING=1` — 传 `"29.90"` 字符串
+- `VITE_WENJUAN_ORDER_AMOUNT_PATCH_AFTER_INSERT=1` — insert 订单后再 patch 金额列（排查首笔未落库）
+
+**以当前项目后端行为为准，二选一或按文档，禁止同时误用两种语义。**
+
+## 与 MWEB（手机浏览器 H5）的区别
+
+| 场景 | 典型 `PaymentType`（以 Schema 为准） | 调起方式 |
+|------|--------------------------------------|----------|
+| 微信内置浏览器 | 常为 `WECHATPAY_MINIPROGRAM`（JSAPI） | `WeixinJSBridge` |
+| 非微信的手机浏览器 | 常为 `WECHATPAY_MOBILE_WEB` | 跳转 `mweb_url` 等（见 `message` 解析） |
+
+MWEB 不在本规则主路径；详见 `wechat-miniprogram-payment.mdc`（参数形态）、`zion-payment.mdc`（通用支付与回跳）。
+
+## 本仓库示例（问卷业务）
+
+以下表名/行为流 ID 仅作本仓库示例，其他项目应替换为自身 Schema：
+
+- 订单 insert：`insert_ud_dingdan_b6a218_one`（见 `WenjuanWechatPayCard`）
+- 可选 Actionflow 建单：`fz_invoke_action_flow`
+
+## 交叉引用
+
+- `wechat-inapp-browser-oauth-login.mdc` — 微信内获取 Zion JWT（网页 `code` 换票或 URL 直传 token）
+- `wechat-miniprogram-payment.mdc` — `createWechatPayment` 返回字段、`wx.requestPayment` 对照
+- `zion-payment.mdc` — 支付宝与其它支付回跳、延迟查询思路
+- `zion-development-best-practices.mdc` — Actionflow 与敏感下单
+
+## 代码生成检查清单 [MUST]
+
+- [ ] 微信内 UA 检测 + `WeixinJSBridgeReady` 后再调起
+- [ ] `createWechatPayment` 带有效 Bearer JWT
+- [ ] `PaymentType` 来自真实 GraphQL 枚举（可配置覆盖）
+- [ ] 不篡改后端返回的签名字段；`package` 保持 `prepay_id=…` 原样
+- [ ] 成功回调后延迟再查库确认支付成功
+- [ ] `amount` 元/分/字符串与后端约定一致，避免重复或颠倒单位

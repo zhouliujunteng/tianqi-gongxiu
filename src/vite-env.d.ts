@@ -12,6 +12,8 @@ interface ImportMetaEnv {
 
   /** 设为 1 时在问卷页展示微信支付卡片（依赖 Zion 订单表 + 微信商户 + 创建订单行为流） */
   readonly VITE_WENJUAN_PAY_ENABLED?: string;
+  /** 已停用：问卷入口直接开放，不再展示「等待开启」 */
+  readonly VITE_WENJUAN_WAIT_OPEN?: string;
   /** 设为 1 时未标记「已支付」则禁止提交问卷 */
   readonly VITE_WENJUAN_PAY_REQUIRE_SUBMIT?: string;
   readonly VITE_WENJUAN_PAY_AMOUNT_YUAN?: string;
@@ -26,6 +28,8 @@ interface ImportMetaEnv {
   readonly VITE_WENJUAN_ORDER_AMOUNT_PATCH_AFTER_INSERT?: string;
   /** 覆盖 GraphQL PaymentType，如 WECHATPAY_MINIPROGRAM、WECHATPAY_MOBILE_WEB */
   readonly VITE_WECHAT_PAYMENT_TYPE?: string;
+  /** 逗号分隔；资格查询 fz_payment_record 时 type 须命中其一。默认含 WECHATPAY_MOBILE_WEB,WECHATPAY_MINIPROGRAM */
+  readonly VITE_WENJUAN_PAY_ELIGIBILITY_TYPES?: string;
 
   /** 若小程序用行为流建支付订单，填同一行为流 id，网页将走 fz_invoke_action_flow 而非 insert 订单表 */
   readonly VITE_WENJUAN_ORDER_CREATE_ACTION_FLOW_ID?: string;
@@ -35,6 +39,9 @@ interface ImportMetaEnv {
   readonly VITE_WENJUAN_ORDER_CREATE_FLOW_ARGS_JSON?: string;
   /** 若返回值里订单 id 不在默认字段名中，填顶层键名，如 dingdan_id */
   readonly VITE_WENJUAN_ORDER_CREATE_FLOW_ORDER_ID_KEY?: string;
+
+  /** 共修营第三期：后端老师账号 ID（逗号分隔），进入「微信添加」管理页 */
+  readonly VITE_CAMP_WECHAT_ADMIN_ACCOUNT_IDS?: string;
 }
 
 interface ImportMeta {

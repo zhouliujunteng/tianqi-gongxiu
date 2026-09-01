@@ -9,18 +9,13 @@ import { FALLBACK_WECHAT_OAUTH_URL_TEMPLATE } from '../constants/wechatOAuth';
  * `base` 须含 `{REDIRECT}` 或由调用方用 append 分支处理。
  */
 export function buildWechatOAuthRedirectUrl(base: string): string {
-  const pathAndQuery = `${window.location.pathname}${window.location.search}`;
+  /** 回跳地址带上 hash，避免 ref 仅写在 # 后时授权回来丢参 */
+  const pathAndQuery = `${window.location.pathname}${window.location.search}${window.location.hash || ''}`;
   const back = encodeURIComponent(
     `${window.location.origin}${pathAndQuery}`
   );
 
-  const refFromQs = new URLSearchParams(window.location.search)
-    .get('ref')
-    ?.trim();
-  const inviterRef =
-    refFromQs && /^\d+$/.test(refFromQs)
-      ? refFromQs
-      : getInviterYonghukuId();
+  const inviterRef = getInviterYonghukuId();
 
   let url: string;
   if (base.includes('{REDIRECT}')) {

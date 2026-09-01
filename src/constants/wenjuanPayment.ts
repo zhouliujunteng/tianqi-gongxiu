@@ -20,6 +20,14 @@ export function isWenjuanWechatPayEnabled(): boolean {
 }
 
 /**
+ * 问卷入口开关：
+ * 当前问卷入口直接开放，不再展示「等待开启」拦截页。
+ */
+export function isWenjuanWaitingOpenEnabled(): boolean {
+  return false;
+}
+
+/**
  * 为真时须通过支付资格校验后才能提交（与是否启用微信支付 UI 无关）。
  * 未设置变量时：生产构建（vite build）默认为 true，开发服默认为 false，避免忘配环境仍可免费提交。
  */
@@ -88,6 +96,31 @@ export function wenjuanPayAmountForCreateWechatPayment(): number | string {
   return yuan;
 }
 
+/**
+ * 把任意「元」金额转换为给 `createWechatPayment(amount)` 用的参数形态：
+ * - 默认：number（元）
+ * - `VITE_WENJUAN_CREATE_WECHAT_PAY_AMOUNT_AS_FEN=1`：整数分（number）
+ * - `VITE_WENJUAN_CREATE_WECHAT_PAY_AMOUNT_AS_YUAN_STRING=1`：字符串 "29.90"
+ */
+export function wenjuanPayAmountForCreateWechatPaymentFromYuan(
+  amountYuan: number
+): number | string {
+  const yuan = Math.round(amountYuan * 100) / 100;
+  const fen = Math.round(yuan * 100);
+  if (createWechatPaymentAmountUsesFen()) {
+    return fen;
+  }
+  if (
+    parseEnvFlag(
+      import.meta.env.VITE_WENJUAN_CREATE_WECHAT_PAY_AMOUNT_AS_YUAN_STRING,
+      false
+    )
+  ) {
+    return yuan.toFixed(2);
+  }
+  return yuan;
+}
+
 /** insert 订单后再次 update_by_pk 写入金额列（排查首笔 insert 未落库时用） */
 export function shouldPatchDingdanAmountAfterInsert(): boolean {
   return parseEnvFlag(
@@ -116,12 +149,48 @@ export function wenjuanPayPaymentType(isWeixinBrowser: boolean): string {
   return isWeixinBrowser ? 'WECHATPAY_MINIPROGRAM' : 'WECHATPAY_MOBILE_WEB';
 }
 
+const DEFAULT_PAY_ELIGIBILITY_TYPES = [
+  'WECHATPAY_MOBILE_WEB',
+  'WECHATPAY_MINIPROGRAM',
+] as const;
+
+/**
+ * 问卷「已付费」资格查询：Zion 表 fz_payment_record（控制台「支付」）须同时匹配
+ * account_id、status=SUCCESSFUL、type 为本列表之一。
+ * 覆盖：VITE_WENJUAN_PAY_ELIGIBILITY_TYPES=WECHATPAY_MOBILE_WEB,WECHATPAY_MINIPROGRAM
+ */
+export function wenjuanPayEligibilityTypes(): string[] {
+  const raw = import.meta.env.VITE_WENJUAN_PAY_ELIGIBILITY_TYPES?.trim();
+  if (raw) {
+    const list = raw
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (list.length > 0) return list;
+  }
+  return [...DEFAULT_PAY_ELIGIBILITY_TYPES];
+}
+
 export const WENJUAN_PAY_OK_STORAGE_KEY = 'tqwj_wenjuan_wxpay_ok';
+
+/** 共修营：微信支付完成的前端标记（与问卷支付分离，避免串状态） */
+export const WENJUAN_CAMP_PAY_OK_STORAGE_KEY = 'tqwj_camp_wxpay_ok';
+
+/** 二阶共修营：微信支付完成的前端标记（与问卷/一阶共修营分离） */
+export const WENJUAN_ADVANCED_CAMP_PAY_OK_STORAGE_KEY =
+  'tqwj_advanced_camp_wxpay_ok';
 
 /**
  * 调起 H5(MWEB) 微信支付前写入 sessionStorage；回到本站后据此延迟查询 `fz_payment_record`（Zion webhook 异步，见仓库 payment rules）。
  */
 export const WENJUAN_WXPAY_H5_PENDING_KEY = 'tqwj_wenjuan_wxpay_h5_pending';
+
+/** 共修营：MWEB 跳转等待标记（与问卷支付分离） */
+export const WENJUAN_CAMP_WXPAY_H5_PENDING_KEY = 'tqwj_camp_wxpay_h5_pending';
+
+/** 二阶共修营：MWEB 跳转等待标记（与问卷/一阶共修营分离） */
+export const WENJUAN_ADVANCED_CAMP_WXPAY_H5_PENDING_KEY =
+  'tqwj_advanced_camp_wxpay_h5_pending';
 
 /** 微信侧 success 后首轮等待毫秒（与 zion-payment / wechat-miniprogram-payment 建议 ~2s 一致） */
 export const WENJUAN_PAY_WEBHOOK_WAIT_MS = 2500;

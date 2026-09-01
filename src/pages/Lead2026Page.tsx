@@ -1,14 +1,11 @@
-import { useMutation, useQuery } from '@apollo/client';
+import { useApolloClient, useMutation, useQuery } from '@apollo/client';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import {
   captureInviterRefFromUrl,
   clearInviterYonghukuId,
   getInviterYonghukuId,
 } from '../auth/inviterRef';
-import {
-  buildWechatOAuthRedirectUrl,
-  buildWechatOAuthUrlForWeixinBrowser,
-} from '../auth/wechatLoginUrl';
+import { buildWechatOAuthUrlForWeixinBrowser } from '../auth/wechatLoginUrl';
 import { clearZionJwt, getZionJwt, getZionJwtUserId } from '../auth/zionJwt';
 import { BrandLogoMark } from '../components/BrandLogoMark';
 import { WenjuanWechatPayCard } from '../components/WenjuanWechatPayCard';
@@ -17,6 +14,7 @@ import {
   isWenjuanPayManualClientConfirmAllowed,
   isWenjuanPayRequiredForSubmit,
   isWenjuanWechatPayEnabled,
+  isWenjuanWaitingOpenEnabled,
   WENJUAN_PAY_OK_STORAGE_KEY,
   WENJUAN_PAY_WEBHOOK_RETRY_WAIT_MS,
   WENJUAN_PAY_WEBHOOK_WAIT_MS,
@@ -27,14 +25,16 @@ import {
   BRAND_LOGO_FROM_GLOBAL_DOC,
   INSERT_LEAD_2026,
   ME_ACCOUNT,
-  MY_LEAD_2026_EXISTS,
+  MY_LEAD_2026_LIST,
+  UPDATE_LEAD_2026,
   WENJUAN_PAY_ELIGIBILITY,
 } from '../graphql/operations';
 import type {
   BrandLogoQueryData,
   Lead2026FormValues,
   MeAccountRow,
-  MyLead2026ExistsData,
+  MyLead2026Item,
+  MyLead2026ListData,
   WenjuanPayEligibilityData,
 } from '../types/lead2026';
 import { emptyLeadForm } from '../types/lead2026';
@@ -56,6 +56,103 @@ function toShoujiNeirong(v: Lead2026FormValues): Record<string, unknown> {
     家长姓名: v.parentName,
     联系电话: v.parentPhone,
   };
+}
+
+function fromShoujiNeirong(raw: Record<string, unknown> | null | undefined): Lead2026FormValues {
+  if (!raw) return emptyLeadForm();
+  const arr = raw['问题选项_家长认为最重要的两项'];
+  return {
+    childName: String(raw['姓名'] ?? ''),
+    gender: String(raw['性别'] ?? ''),
+    age: String(raw['年龄'] ?? ''),
+    grade: String(raw['年级'] ?? ''),
+    incomeSource: String(raw['孩子经济来源'] ?? ''),
+    priorityTwo: Array.isArray(arr) ? arr.map((x) => String(x)).slice(0, 2) : [],
+    issueDescription: String(raw['问题描述'] ?? ''),
+    dailyPerformance: String(raw['日常表现'] ?? ''),
+    parentName: String(raw['家长姓名'] ?? ''),
+    parentPhone: String(raw['联系电话'] ?? ''),
+  };
+}
+
+function leadSummary(raw: Record<string, unknown> | null | undefined): {
+  childName: string;
+  grade: string;
+  parentName: string;
+  parentPhone: string;
+  tags: string[];
+} {
+  if (!raw) {
+    return {
+      childName: '未填写',
+      grade: '未填写',
+      parentName: '未填写',
+      parentPhone: '未填写',
+      tags: [],
+    };
+  }
+  const arr = raw['问题选项_家长认为最重要的两项'];
+  return {
+    childName: String(raw['姓名'] ?? '未填写'),
+    grade: String(raw['年级'] ?? '未填写'),
+    parentName: String(raw['家长姓名'] ?? '未填写'),
+    parentPhone: String(raw['联系电话'] ?? '未填写'),
+    tags: Array.isArray(arr) ? arr.map((x) => String(x)).slice(0, 2) : [],
+  };
+}
+
+function hasInitialPlan(raw: Record<string, unknown> | null | undefined): boolean {
+  if (!raw) return false;
+  const values = Object.values(raw);
+  if (values.length === 0) return false;
+  return values.some((v) => {
+    if (v === null || v === undefined) return false;
+    if (typeof v === 'string') return v.trim().length > 0;
+    if (Array.isArray(v)) return v.length > 0;
+    if (typeof v === 'object') return Object.keys(v as Record<string, unknown>).length > 0;
+    return true;
+  });
+}
+
+function renderJsonReadable(value: unknown): string {
+  if (value === null || value === undefined) return '—';
+  if (typeof value === 'string') return value.trim() || '—';
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (Array.isArray(value)) {
+    if (value.length === 0) return '—';
+    return value.map((v) => renderJsonReadable(v)).join('；');
+  }
+  if (typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>);
+    if (entries.length === 0) return '—';
+    return entries.map(([k, v]) => `${k}：${renderJsonReadable(v)}`).join('；');
+  }
+  return String(value);
+}
+
+function InitialPlanSection({ plan }: { plan: Record<string, unknown> | null | undefined }) {
+  if (!hasInitialPlan(plan)) return null;
+  const entries = Object.entries(plan ?? {}).filter(([, v]) => {
+    if (v === null || v === undefined) return false;
+    if (typeof v === 'string') return v.trim().length > 0;
+    if (Array.isArray(v)) return v.length > 0;
+    if (typeof v === 'object') return Object.keys(v as Record<string, unknown>).length > 0;
+    return true;
+  });
+  if (entries.length === 0) return null;
+  return (
+    <section className="mt-4 rounded-2xl border border-primary/25 bg-primary/5 p-4 md:p-5">
+      <h3 className="font-display text-lg text-primary">初步方案</h3>
+      <div className="mt-3 space-y-2 text-sm leading-relaxed text-foreground/95">
+        {entries.map(([k, v]) => (
+          <p key={k}>
+            <span className="font-semibold text-foreground">{k}：</span>
+            <span className="text-foreground/90">{renderJsonReadable(v)}</span>
+          </p>
+        ))}
+      </div>
+    </section>
+  );
 }
 
 function isZionPaymentSuccessful(status: string | null | undefined): boolean {
@@ -88,7 +185,7 @@ function LoginAccountIdHint({ accountId }: { accountId: string | null }) {
 }
 
 const inputClass =
-  'w-full rounded-xl border border-border bg-background px-4 py-3 text-foreground placeholder:text-muted-foreground/60 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/25';
+  'w-full min-h-12 rounded-xl border border-border bg-background px-4 py-3 text-foreground placeholder:text-muted-foreground/60 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/25';
 const labelClass = 'mb-2 block font-display text-sm font-semibold text-foreground';
 
 export function Lead2026Page({
@@ -100,15 +197,12 @@ export function Lead2026Page({
 } = {}) {
   const token = getZionJwt();
   const jwtAccountId = getZionJwtUserId();
+  const waitOpen = isWenjuanWaitingOpenEnabled();
   const wechatOAuthConfigured = Boolean(
     import.meta.env.VITE_ZION_WECHAT_OAUTH_URL?.trim()
   );
   const inWeChatBrowser = isWeixinBrowser();
   const wechatUrlMobile = buildWechatOAuthUrlForWeixinBrowser();
-  const pcOauthBase = import.meta.env.VITE_ZION_WECHAT_OAUTH_URL_PC?.trim();
-  const wechatUrlDesktop = pcOauthBase
-    ? buildWechatOAuthRedirectUrl(pcOauthBase)
-    : '';
 
   useLayoutEffect(() => {
     captureInviterRefFromUrl();
@@ -127,11 +221,21 @@ export function Lead2026Page({
     error: meError,
   } = useQuery<{ account: MeAccountRow[] }>(ME_ACCOUNT, {
     variables: { accountId: jwtAccountId ?? '0' },
-    skip: !token || !jwtAccountId,
+    skip: waitOpen || !token || !jwtAccountId,
     fetchPolicy: 'network-only',
   });
 
   const meRow = meData?.account?.[0];
+
+  /** 与 Zion 支付表 account_id、JWT 一致；优先 JWT，避免 meRow 与 token 不同步时查不到支付记录 */
+  const payAccountId = useMemo(() => {
+    if (jwtAccountId && /^\d+$/.test(jwtAccountId)) return jwtAccountId;
+    const id = meRow?.id?.trim();
+    if (id && /^\d+$/.test(id)) return id;
+    return null;
+  }, [jwtAccountId, meRow?.id]);
+
+  const apolloClient = useApolloClient();
 
   /** 仅由 VITE_WENJUAN_PAY_REQUIRE_SUBMIT 控制；与 VITE_WENJUAN_PAY_ENABLED（微信支付卡片）解耦 */
   const paySubmitRequired = isWenjuanPayRequiredForSubmit();
@@ -142,28 +246,27 @@ export function Lead2026Page({
     error: eligibilityError,
     refetch: refetchEligibility,
   } = useQuery<WenjuanPayEligibilityData>(WENJUAN_PAY_ELIGIBILITY, {
-    variables: { accountId: meRow?.id ?? '0' },
-    skip: !token || !meRow?.id || !paySubmitRequired,
+    variables: { accountId: payAccountId ?? '0' },
+    skip: waitOpen || !token || !paySubmitRequired || !payAccountId,
     fetchPolicy: 'network-only',
     notifyOnNetworkStatusChange: true,
   });
 
   const {
-    data: leadExistsData,
-    loading: leadExistsLoading,
-    error: leadExistsError,
-  } = useQuery<MyLead2026ExistsData>(MY_LEAD_2026_EXISTS, {
+    data: leadListData,
+    loading: leadListLoading,
+    error: leadListError,
+    refetch: refetchLeadList,
+  } = useQuery<MyLead2026ListData>(MY_LEAD_2026_LIST, {
     variables: { accountId: meRow?.id ?? '0' },
-    skip: !token || !meRow?.id,
+    skip: waitOpen || !token || !meRow?.id,
     fetchPolicy: 'network-only',
   });
 
   const hasSuccessfulPayment = useMemo(() => {
-    return (
-      eligibilityData?.fz_payment_record?.some((r) =>
-        isZionPaymentSuccessful(r.status)
-      ) ?? false
-    );
+    const rows = eligibilityData?.fz_payment_record;
+    if (!rows?.length) return false;
+    return rows.some((r) => isZionPaymentSuccessful(r.status));
   }, [eligibilityData]);
 
   const paidViaZion = hasSuccessfulPayment;
@@ -171,6 +274,8 @@ export function Lead2026Page({
   const [screen, setScreen] = useState<Screen>('form');
   const [form, setForm] = useState<Lead2026FormValues>(emptyLeadForm);
   const [submitErr, setSubmitErr] = useState<string | null>(null);
+  const [editingLeadId, setEditingLeadId] = useState<string | null>(null);
+  const [viewingLead, setViewingLead] = useState<MyLead2026Item | null>(null);
 
   const [payUnlocked, setPayUnlocked] = useState(() => {
     if (!isWenjuanPayRequiredForSubmit()) {
@@ -186,8 +291,11 @@ export function Lead2026Page({
     }
   });
 
-  const alreadySubmitted =
-    (leadExistsData?.ud_wenjuanshouji_2026yinliu_cb3e5d?.length ?? 0) > 0;
+  const myLeadList = leadListData?.ud_wenjuanshouji_2026yinliu_cb3e5d ?? [];
+  const currentLead = myLeadList[0] ?? null;
+  const planPublished = hasInitialPlan(currentLead?.ud_chubufangan_094122);
+  const canEditCurrentLead = Boolean(currentLead) && !planPublished;
+  const showFormEditor = !currentLead || Boolean(editingLeadId);
 
   /** 须先停留在支付页，完成支付（或手动确认）后才能进入问卷填写页 */
   const needPayWall =
@@ -195,25 +303,39 @@ export function Lead2026Page({
     !payUnlocked &&
     (eligibilityLoading || !paidViaZion);
 
+  useEffect(() => {
+    if (!paidViaZion) return;
+    setPayUnlocked(true);
+  }, [paidViaZion]);
+
   const confirmPaidWithBackend = useCallback(async (): Promise<boolean> => {
-    await new Promise((r) => setTimeout(r, WENJUAN_PAY_WEBHOOK_WAIT_MS));
-    const r1 = await refetchEligibility();
-    const ok1 =
-      r1.data?.fz_payment_record?.some((rec) =>
+    if (!payAccountId) return false;
+    const hasOk = (data: WenjuanPayEligibilityData | undefined): boolean =>
+      (data?.fz_payment_record?.some((rec) =>
         isZionPaymentSuccessful(rec.status)
-      ) ?? false;
-    if (ok1) return true;
-    await new Promise((r) => setTimeout(r, WENJUAN_PAY_WEBHOOK_RETRY_WAIT_MS));
-    const r2 = await refetchEligibility();
-    return (
-      r2.data?.fz_payment_record?.some((rec) =>
-        isZionPaymentSuccessful(rec.status)
-      ) ?? false
-    );
-  }, [refetchEligibility]);
+      ) ?? false);
+    const maxAttempts = 10;
+    let waitMs = WENJUAN_PAY_WEBHOOK_WAIT_MS;
+    for (let i = 0; i < maxAttempts; i += 1) {
+      await new Promise((r) => setTimeout(r, waitMs));
+      const fresh = await apolloClient.query<WenjuanPayEligibilityData>({
+        query: WENJUAN_PAY_ELIGIBILITY,
+        variables: { accountId: payAccountId },
+        fetchPolicy: 'no-cache',
+      });
+      if (hasOk(fresh.data)) {
+        await refetchEligibility();
+        return true;
+      }
+      const res = await refetchEligibility();
+      if (hasOk(res.data)) return true;
+      waitMs = WENJUAN_PAY_WEBHOOK_RETRY_WAIT_MS;
+    }
+    return false;
+  }, [apolloClient, payAccountId, refetchEligibility]);
 
   useEffect(() => {
-    if (!token || !meRow?.id || !paySubmitRequired) return;
+    if (!token || !payAccountId || !paySubmitRequired) return;
     let h5OnLoad = false;
     try {
       h5OnLoad = sessionStorage.getItem(WENJUAN_WXPAY_H5_PENDING_KEY) === '1';
@@ -230,10 +352,18 @@ export function Lead2026Page({
       void refetchEligibility();
     }, WENJUAN_PAY_WEBHOOK_WAIT_MS);
     return () => window.clearTimeout(t);
-  }, [token, meRow?.id, paySubmitRequired, refetchEligibility]);
+  }, [token, payAccountId, paySubmitRequired, refetchEligibility]);
 
   useEffect(() => {
-    if (!token || !meRow?.id || !paySubmitRequired) return;
+    if (!token || !payAccountId || !paySubmitRequired || paidViaZion) return;
+    const timer = window.setInterval(() => {
+      void refetchEligibility();
+    }, 4000);
+    return () => window.clearInterval(timer);
+  }, [token, payAccountId, paySubmitRequired, paidViaZion, refetchEligibility]);
+
+  useEffect(() => {
+    if (!token || !payAccountId || !paySubmitRequired) return;
     const onVis = () => {
       if (document.visibilityState !== 'visible') return;
       let h5Pending = false;
@@ -258,7 +388,7 @@ export function Lead2026Page({
     };
     document.addEventListener('visibilitychange', onVis);
     return () => document.removeEventListener('visibilitychange', onVis);
-  }, [token, meRow?.id, paySubmitRequired, refetchEligibility]);
+  }, [token, payAccountId, paySubmitRequired, refetchEligibility]);
 
   const showWechatPayCard =
     paySubmitRequired &&
@@ -275,6 +405,7 @@ export function Lead2026Page({
     !eligibilityLoading;
 
   const [insertLead] = useMutation(INSERT_LEAD_2026);
+  const [updateLead] = useMutation(UPDATE_LEAD_2026);
 
   const doInsert = useCallback(
     async (v: Lead2026FormValues, account: MeAccountRow) => {
@@ -297,10 +428,6 @@ export function Lead2026Page({
   const onSubmitForm = useCallback(
     async (v: Lead2026FormValues) => {
       if (!meRow) return;
-      if (alreadySubmitted) {
-        setSubmitErr('您已提交过问卷，不可重复提交。');
-        return;
-      }
       if (
         paySubmitRequired &&
         !payUnlocked &&
@@ -311,7 +438,28 @@ export function Lead2026Page({
       }
       setSubmitErr(null);
       try {
-        await doInsert(v, meRow);
+        if (editingLeadId) {
+          if (!canEditCurrentLead) {
+            setSubmitErr('初步方案已给出，当前问卷已锁定，暂不可修改。');
+            return;
+          }
+          await updateLead({
+            variables: {
+              id: editingLeadId,
+              set: {
+                ud_shoujineirong_3bc0b9: toShoujiNeirong(v),
+              },
+            },
+          });
+        } else {
+          if (currentLead) {
+            setSubmitErr('您已填写过问卷。可在下方查看；若初步方案未给出，可继续修改。');
+            return;
+          }
+          await doInsert(v, meRow);
+        }
+        await refetchLeadList();
+        setEditingLeadId(null);
         setScreen('thanks');
       } catch (e) {
         setSubmitErr(friendlyRequestErrorMessage(e));
@@ -319,8 +467,12 @@ export function Lead2026Page({
     },
     [
       doInsert,
+      updateLead,
+      editingLeadId,
+      canEditCurrentLead,
+      currentLead,
+      refetchLeadList,
       meRow,
-      alreadySubmitted,
       paySubmitRequired,
       payUnlocked,
       eligibilityLoading,
@@ -367,8 +519,20 @@ export function Lead2026Page({
             提交成功
           </h2>
           <p className="mt-3 text-muted-foreground">
-            感谢您的填写，我们已收到问卷信息。
+            {editingLeadId ? '问卷已更新。' : '感谢您的填写，我们已收到问卷信息。'}
           </p>
+          <button
+            type="button"
+            className="mt-6 rounded-full bg-primary px-8 py-3 font-semibold text-primary-foreground"
+            onClick={() => {
+              setScreen('form');
+              setEditingLeadId(null);
+              setViewingLead(null);
+              setForm(emptyLeadForm());
+            }}
+          >
+            返回问卷页（继续创建/查看/修改）
+          </button>
         </div>
         <SubtleAccountFooter accountId={meRow.id} />
       </div>
@@ -393,6 +557,20 @@ export function Lead2026Page({
     );
   }
 
+  if (waitOpen) {
+    return (
+      <div className="relative z-10 mx-auto max-w-lg px-4 py-16 text-center">
+        <div className="rounded-[2rem] border border-border bg-card p-10 shadow-organic">
+          <BrandLogoMark url={brandLogoUrl} title="问卷收集" isPrimaryPageHeading className="mb-5" />
+          <h2 className="font-display text-3xl text-foreground md:text-4xl">等待开启</h2>
+          <p className="mx-auto mt-4 max-w-md text-sm leading-relaxed text-foreground/85 md:text-base">
+            当前 29.8 问卷入口暂未开放，请留意群内或客服通知；开放后可直接使用当前链接进入。
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   if (!token) {
     return (
       <LoginGateScreen
@@ -400,7 +578,6 @@ export function Lead2026Page({
         loginAccountId={jwtAccountId}
         inWeChatBrowser={inWeChatBrowser}
         wechatUrlMobile={wechatUrlMobile}
-        wechatUrlDesktop={wechatUrlDesktop}
         wechatOAuthConfigured={wechatOAuthConfigured}
         oauthExchangePending={wechatOAuthExchangePending}
         oauthExchangeError={wechatOAuthExchangeError}
@@ -408,7 +585,7 @@ export function Lead2026Page({
         subtitle={
           inWeChatBrowser
             ? '请先完成微信授权登录。登录后将进入支付或问卷流程。'
-            : '在电脑浏览器中可使用下方「微信登录」扫码；或在手机微信中直接打开本页完成授权。'
+            : '本页仅支持在微信内打开。请复制当前链接，发送到微信聊天或「文件传输助手」后再打开。'
         }
       />
     );
@@ -449,21 +626,21 @@ export function Lead2026Page({
     );
   }
 
-  if (token && meRow && leadExistsLoading) {
+  if (token && meRow && leadListLoading) {
     return (
       <div className="relative z-10 flex min-h-[50vh] flex-col items-center justify-center gap-3 text-muted-foreground">
-        <p>正在确认是否已填写过问卷…</p>
+        <p>正在加载我的问卷…</p>
       </div>
     );
   }
 
-  if (token && meRow && leadExistsError) {
+  if (token && meRow && leadListError) {
     return (
       <div className="relative z-10 mx-auto max-w-md px-4 py-16 text-center">
         <div className="rounded-[2rem] border border-border bg-card p-8 shadow-organic-sm">
-          <h2 className="font-display text-xl text-destructive">无法校验问卷记录</h2>
+          <h2 className="font-display text-xl text-destructive">无法加载问卷记录</h2>
           <p className="mt-3 text-sm text-muted-foreground">
-            {friendlyRequestErrorMessage(leadExistsError)}
+            {friendlyRequestErrorMessage(leadListError)}
           </p>
           <button
             type="button"
@@ -473,23 +650,6 @@ export function Lead2026Page({
             点击刷新
           </button>
         </div>
-      </div>
-    );
-  }
-
-  if (token && meRow && alreadySubmitted) {
-    return (
-      <div className="relative z-10 mx-auto max-w-lg px-4 py-16 text-center">
-        <div className="rounded-[2rem] border border-border bg-card p-10 shadow-organic">
-          <p className="text-4xl" aria-hidden>
-            ✓
-          </p>
-          <h2 className="mt-4 font-display text-3xl text-foreground">您已填写过问卷</h2>
-          <p className="mt-3 text-muted-foreground">
-            每个帐户仅可提交一次。如需修改请联系工作人员。
-          </p>
-        </div>
-        <SubtleAccountFooter accountId={meRow.id} />
       </div>
     );
   }
@@ -553,7 +713,7 @@ export function Lead2026Page({
         <article className="rounded-tl-[1.75rem] rounded-tr-[1.25rem] rounded-br-[2rem] rounded-bl-[1.35rem] border border-border bg-card p-6 shadow-organic-sm md:p-10">
           {showWechatPayCard ? (
             <WenjuanWechatPayCard
-              accountId={meRow.id}
+              accountId={payAccountId ?? meRow.id}
               confirmPaidWithBackend={confirmPaidWithBackend}
               onPaidMarked={() => setPayUnlocked(true)}
             />
@@ -607,7 +767,7 @@ export function Lead2026Page({
           className="mb-5"
         />
         <p className="mx-auto mt-3 max-w-md text-sm text-muted-foreground">
-          请填写下列信息。每位登录帐户仅可提交一次，提交后将关联到当前帐户。
+          请填写下列信息。每个账号仅保留一份问卷；提交后可查看，且仅在初步方案给出前可修改。
         </p>
         <div className="mt-4 flex flex-wrap items-center justify-center gap-3 text-xs text-muted-foreground">
           <span>
@@ -631,19 +791,124 @@ export function Lead2026Page({
         <LoginAccountIdHint accountId={jwtAccountId ?? meRow?.id ?? null} />
       </header>
 
-      <article className="rounded-tl-[1.75rem] rounded-tr-[1.25rem] rounded-br-[2rem] rounded-bl-[1.35rem] border border-border bg-card p-6 shadow-organic-sm md:p-10">
-        <form
-          className="flex flex-col gap-8"
-          onSubmit={(e) => {
-            e.preventDefault();
-            const err = validate(form);
-            if (err) {
-              setSubmitErr(err);
-              return;
-            }
-            void onSubmitForm(form);
-          }}
-        >
+      <article className="rounded-tl-[1.75rem] rounded-tr-[1.25rem] rounded-br-[2rem] rounded-bl-[1.35rem] border border-border bg-card p-5 shadow-organic-sm md:p-10">
+        <section className="mb-7 rounded-2xl border border-border/70 bg-muted/30 p-4 md:p-5">
+          <h2 className="font-display text-lg text-primary">我的问卷</h2>
+          {!currentLead ? (
+            <p className="mt-2 text-sm leading-relaxed text-muted-foreground">暂无已提交记录。</p>
+          ) : (
+            <div className="mt-3">
+              {(() => {
+                const idStr = String(currentLead.id);
+                const s = leadSummary(currentLead.ud_shoujineirong_3bc0b9);
+                return (
+                  <div className="rounded-2xl border border-border/60 bg-background/60 p-3.5">
+                    <p className="text-xs text-muted-foreground">
+                      编号：<span className="font-mono">{idStr}</span>
+                      {' · '}
+                      提交时间：{currentLead.created_at ? new Date(currentLead.created_at).toLocaleString() : '未知'}
+                    </p>
+                    <div className="mt-2 grid gap-2 text-sm text-foreground/90">
+                      <p>
+                        <span className="text-muted-foreground">孩子：</span>
+                        {s.childName}
+                        {' · '}
+                        <span className="text-muted-foreground">年级：</span>
+                        {s.grade}
+                      </p>
+                      <p>
+                        <span className="text-muted-foreground">家长：</span>
+                        {s.parentName}
+                        {' · '}
+                        <span className="text-muted-foreground">电话：</span>
+                        {s.parentPhone}
+                      </p>
+                      {s.tags.length > 0 ? (
+                        <p className="text-xs text-muted-foreground">
+                          关注重点：{s.tags.join('、')}
+                        </p>
+                      ) : null}
+                      <p className={`text-xs ${planPublished ? 'text-destructive' : 'text-primary'}`}>
+                        {planPublished
+                          ? '状态：初步方案已给出，问卷已锁定，不可修改。'
+                          : '状态：初步方案未给出，可继续修改问卷。'}
+                      </p>
+                    </div>
+                    <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+                      <button
+                        type="button"
+                        className="min-h-12 w-full rounded-full border border-border px-5 py-2.5 text-sm text-foreground transition hover:bg-muted/50 sm:w-auto"
+                        onClick={() => {
+                          setViewingLead(currentLead);
+                          setEditingLeadId(null);
+                        }}
+                      >
+                        查看详情
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!canEditCurrentLead}
+                        className="min-h-12 w-full rounded-full border border-primary/40 px-5 py-2.5 text-sm text-primary transition enabled:hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
+                        onClick={() => {
+                          if (!canEditCurrentLead) return;
+                          setViewingLead(null);
+                          setEditingLeadId(idStr);
+                          setForm(fromShoujiNeirong(currentLead.ud_shoujineirong_3bc0b9));
+                          setSubmitErr(null);
+                        }}
+                      >
+                        修改问卷
+                      </button>
+                    </div>
+                    <InitialPlanSection plan={currentLead.ud_chubufangan_094122} />
+                  </div>
+                );
+              })()}
+            </div>
+          )}
+          {viewingLead ? (
+            <div className="mt-4 rounded-2xl border border-border/70 bg-background/60 p-3.5">
+              <p className="text-xs text-muted-foreground">
+                问卷详情（编号：<span className="font-mono">{String(viewingLead.id)}</span>）
+              </p>
+              <div className="mt-2 grid gap-2 text-sm leading-relaxed text-foreground/95">
+                {(() => {
+                  const v = fromShoujiNeirong(viewingLead.ud_shoujineirong_3bc0b9);
+                  return (
+                    <>
+                      <p><span className="text-muted-foreground">孩子：</span>{v.childName}（{v.gender || '未填'}，{v.age || '未填'}岁，{v.grade || '未填'}）</p>
+                      <p><span className="text-muted-foreground">经济来源：</span>{v.incomeSource || '未填写'}</p>
+                      <p><span className="text-muted-foreground">关注重点：</span>{v.priorityTwo.length ? v.priorityTwo.join('、') : '未填写'}</p>
+                      <p><span className="text-muted-foreground">问题描述：</span>{v.issueDescription || '未填写'}</p>
+                      <p><span className="text-muted-foreground">日常表现：</span>{v.dailyPerformance || '未填写'}</p>
+                      <p><span className="text-muted-foreground">家长：</span>{v.parentName || '未填写'}（{v.parentPhone || '未填写'}）</p>
+                    </>
+                  );
+                })()}
+              </div>
+              <button
+                type="button"
+                className="mt-3 min-h-12 w-full rounded-full border border-border px-5 py-2.5 text-sm text-muted-foreground transition hover:bg-muted/50 sm:w-auto"
+                onClick={() => setViewingLead(null)}
+              >
+                关闭详情
+              </button>
+            </div>
+          ) : null}
+        </section>
+        {showFormEditor ? (
+          <form
+            className="flex flex-col gap-7"
+            onSubmit={(e) => {
+              e.preventDefault();
+              const err = validate(form);
+              if (err) {
+                setSubmitErr(err);
+                return;
+              }
+              void onSubmitForm(form);
+            }}
+          >
           <section>
             <h2 className="font-display text-lg text-primary">孩子信息</h2>
             <div className="mt-4 grid gap-5 md:grid-cols-2">
@@ -806,13 +1071,34 @@ export function Lead2026Page({
             </p>
           ) : null}
 
-          <button
-            type="submit"
-            className="rounded-full bg-secondary px-10 py-3.5 font-semibold text-secondary-foreground shadow-organic-sm transition enabled:hover:opacity-95"
-          >
-            提交问卷
-          </button>
-        </form>
+            <div className="flex flex-col gap-3 pt-1 sm:flex-row sm:flex-wrap">
+              <button
+                type="submit"
+                className="min-h-12 w-full rounded-full bg-secondary px-8 py-3 font-semibold text-secondary-foreground shadow-organic-sm transition enabled:hover:opacity-95 sm:w-auto"
+              >
+                {editingLeadId ? '保存问卷' : '提交问卷'}
+              </button>
+              {editingLeadId ? (
+                <button
+                  type="button"
+                  className="min-h-12 w-full rounded-full border border-border px-8 py-3 text-sm text-muted-foreground transition hover:bg-muted/50 sm:w-auto"
+                  onClick={() => {
+                    setEditingLeadId(null);
+                    setForm(currentLead ? fromShoujiNeirong(currentLead.ud_shoujineirong_3bc0b9) : emptyLeadForm());
+                    setSubmitErr(null);
+                  }}
+                >
+                  取消编辑
+                </button>
+              ) : null}
+            </div>
+          </form>
+        ) : (
+          <section className="rounded-2xl border border-border/70 bg-muted/20 p-4 text-sm leading-relaxed text-muted-foreground">
+            当前账号已提交问卷。你可以在上方查看问卷内容；
+            {canEditCurrentLead ? '初步方案尚未给出，可点击「修改问卷」进行调整。' : '初步方案已给出，问卷已锁定，暂不可修改。'}
+          </section>
+        )}
       </article>
 
       {meRow && token ? <SubtleAccountFooter accountId={meRow.id} /> : null}
@@ -825,7 +1111,6 @@ function LoginGateScreen({
   loginAccountId,
   inWeChatBrowser,
   wechatUrlMobile,
-  wechatUrlDesktop,
   wechatOAuthConfigured,
   oauthExchangePending,
   oauthExchangeError,
@@ -836,7 +1121,6 @@ function LoginGateScreen({
   loginAccountId: string | null;
   inWeChatBrowser: boolean;
   wechatUrlMobile: string;
-  wechatUrlDesktop: string;
   wechatOAuthConfigured: boolean;
   oauthExchangePending: boolean;
   oauthExchangeError: string | null;
@@ -845,18 +1129,18 @@ function LoginGateScreen({
 }) {
   const [linkCopied, setLinkCopied] = useState(false);
 
-  const qrSrc =
-    wechatUrlMobile.length > 0
-      ? `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(wechatUrlMobile)}`
-      : '';
-
   return (
     <div className="relative z-10 mx-auto flex min-h-[70vh] max-w-lg flex-col justify-center px-4 py-12">
       <div className="rounded-[2rem] border border-border bg-card p-8 text-center shadow-organic md:p-10">
         <BrandLogoMark url={logoUrl} title="问卷收集" className="mb-4" />
-        <h1 className="mt-1 font-display text-3xl text-foreground">{title}</h1>
-        <p className="mx-auto mt-4 max-w-sm text-sm text-muted-foreground leading-relaxed">
-          {subtitle}
+        <h1 className="mt-1 bg-gradient-to-r from-primary via-secondary to-primary bg-clip-text font-display text-4xl font-extrabold tracking-[0.08em] text-transparent md:text-5xl">
+          天启无书
+        </h1>
+        <p className="mx-auto mt-3 max-w-sm text-base font-medium text-foreground leading-relaxed">
+          问卷收集，请先登录
+        </p>
+        <p className="mx-auto mt-3 max-w-sm text-sm text-muted-foreground leading-relaxed">
+          {title}：{subtitle}
         </p>
         {oauthExchangePending ? (
           <p
@@ -910,69 +1194,22 @@ function LoginGateScreen({
                 >
                   {oauthExchangePending ? '登录处理中…' : '微信一键授权登录'}
                 </a>
-              ) : wechatUrlDesktop ? (
-                <>
-                  <a
-                    href={wechatUrlDesktop}
-                    rel="noopener noreferrer"
-                    className="inline-flex min-h-12 items-center justify-center rounded-full bg-[#07C160] px-8 py-3.5 font-semibold text-white shadow-organic-sm hover:opacity-95"
-                  >
-                    微信登录（浏览器内扫码）
-                  </a>
-                  <p className="max-w-sm text-center text-xs text-muted-foreground leading-relaxed">
-                    左键点击后会在<strong className="text-foreground">当前浏览器窗口</strong>
-                    打开微信开放平台扫码页；用手机扫码并确认后，应<strong className="text-foreground">
-                      自动跳回本页
-                    </strong>
-                    并完成登录。请勿依赖「右键 → 在新标签页打开」后仍停留在旧标签；若未跳转，请检查开放平台回调域名与当前站点是否一致（见项目{' '}
-                    <code className="text-foreground">.env.example</code>）。
-                  </p>
-                </>
               ) : (
                 <>
-                  <div className="max-w-sm rounded-2xl border border-secondary/40 bg-accent/30 p-3 text-left text-xs text-accent-foreground leading-relaxed">
-                    <p className="font-semibold text-foreground">电脑浏览器 + 下方二维码</p>
-                    <p className="mt-1">
-                      二维码里是<strong className="text-foreground">公众号网页授权</strong>
-                      链接，只会在你<strong className="text-foreground">手机微信里</strong>
-                      完成授权；手机会登录，但<strong className="text-foreground">
-                        电脑上的本页不会自动变成已登录
-                      </strong>
-                      （微信不会把 code 发给电脑）。这与仓库{' '}
-                      <code className="text-foreground">.env.example</code> 里「系统浏览器无法直接打开授权页」的说明一致。
-                    </p>
-                    <p className="mt-2">
-                      若要在<strong className="text-foreground">电脑同一浏览器窗口</strong>
-                      内扫码并自动回跳登录，请在环境变量中增加开放平台「网站应用」的{' '}
-                      <code className="text-foreground">VITE_ZION_WECHAT_OAUTH_URL_PC</code>
-                      （qrconnect 模板见 <code className="text-foreground">.env.example</code>
-                      ），与 Zion 后台换票配置一致后重新构建部署。
+                  <div
+                    className="max-w-sm rounded-2xl border border-destructive/40 bg-destructive/5 p-4 text-left text-xs text-accent-foreground leading-relaxed"
+                    role="alert"
+                  >
+                    <p className="font-semibold text-destructive">请在微信内打开此链接</p>
+                    <p className="mt-1 text-muted-foreground">
+                      当前不是微信环境，已禁用登录入口。请把当前页面链接发送到微信聊天，或在手机微信中重新打开。
                     </p>
                   </div>
-                  <p className="max-w-sm text-left text-xs text-muted-foreground leading-relaxed">
-                    也可点击「复制授权链接」粘贴到微信聊天中再打开。
-                  </p>
-                  {qrSrc ? (
-                    <div className="mt-2 flex flex-col items-center gap-2">
-                      <img
-                        src={qrSrc}
-                        alt="在微信中打开此二维码以登录"
-                        width={220}
-                        height={220}
-                        className="rounded-2xl border border-border bg-white p-2 shadow-organic-sm"
-                        loading="eager"
-                        decoding="async"
-                      />
-                      <span className="text-[11px] text-muted-foreground">
-                        二维码由第三方服务生成，仅用于编码当前授权链接
-                      </span>
-                    </div>
-                  ) : null}
                   <button
                     type="button"
                     className="inline-flex min-h-12 items-center justify-center rounded-full border-2 border-primary bg-transparent px-8 py-3 text-sm font-bold text-primary transition duration-300 ease-out hover:bg-primary/10"
                     onClick={() => {
-                      void navigator.clipboard.writeText(wechatUrlMobile).then(
+                      void navigator.clipboard.writeText(window.location.href).then(
                         () => {
                           setLinkCopied(true);
                           window.setTimeout(() => setLinkCopied(false), 2500);
@@ -980,7 +1217,7 @@ function LoginGateScreen({
                       );
                     }}
                   >
-                    {linkCopied ? '已复制' : '复制授权链接'}
+                    {linkCopied ? '已复制当前链接' : '复制当前链接到微信打开'}
                   </button>
                 </>
               )}
