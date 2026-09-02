@@ -64,6 +64,7 @@ const CHARGE_ADMIN_ACCOUNT_IDS = new Set([
   '1000000000009519',
   '1000000000009106',
   '1000000000009992',
+  '10000000000009397',
 ]);
 
 function isChargeAdminAccount(accountId: string | null | undefined): boolean {
@@ -738,6 +739,16 @@ export function Lead2026ChargeEnrollPage({
   }
 
   if (isChargeAdmin) {
+    const totalCount = adminRows.length;
+    const joinedCount = adminRows.filter((row) => {
+      const contact = parseCampWechatContactFields(
+        row.ud_gongxiuyingweixin_62acc6,
+        row.ud_tianjiazhuangtai_a1779b
+      );
+      return contact?.friend_status === '已进群';
+    }).length;
+    const pendingCount = totalCount - joinedCount;
+
     return (
       <div className="relative z-10 mx-auto max-w-6xl px-4 py-10 md:py-14">
         <header className="mb-8 text-center">
@@ -752,6 +763,45 @@ export function Lead2026ChargeEnrollPage({
           </p>
           <LoginAccountIdHint accountId={jwtAccountId ?? meRow?.id ?? null} />
         </header>
+
+        <section
+          aria-label="报名数量统计"
+          className="mb-6 grid gap-3 sm:grid-cols-3"
+        >
+          <div className="rounded-[1.75rem] border border-primary/30 bg-primary/10 p-5 shadow-organic-sm md:p-6">
+            <p className="font-display text-xs font-semibold uppercase tracking-[0.2em] text-primary/80">
+              报名总人数
+            </p>
+            <p className="mt-2 font-display text-4xl font-extrabold text-primary md:text-5xl">
+              {totalCount}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              已确认的报名单数（含已进群 / 未进群）
+            </p>
+          </div>
+          <div className="rounded-[1.75rem] border border-primary/30 bg-primary/5 p-5 shadow-organic-sm md:p-6">
+            <p className="font-display text-xs font-semibold uppercase tracking-[0.2em] text-primary/80">
+              已进群
+            </p>
+            <p className="mt-2 font-display text-4xl font-extrabold text-primary md:text-5xl">
+              {joinedCount}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              老师已添加微信并拉入共学群
+            </p>
+          </div>
+          <div className="rounded-[1.75rem] border border-secondary/30 bg-secondary/10 p-5 shadow-organic-sm md:p-6">
+            <p className="font-display text-xs font-semibold uppercase tracking-[0.2em] text-secondary">
+              待进群
+            </p>
+            <p className="mt-2 font-display text-4xl font-extrabold text-secondary md:text-5xl">
+              {pendingCount}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              等待老师按微信号添加
+            </p>
+          </div>
+        </section>
 
         <section className="mb-6 rounded-[2rem] border border-border bg-card p-5 shadow-organic-sm md:p-6">
           <label className={labelClass} htmlFor="charge-admin-search">
