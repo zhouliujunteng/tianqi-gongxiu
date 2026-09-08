@@ -575,6 +575,7 @@ export function Lead2026CampEnrollPage({
 
   const {
     data: eligibilityData,
+    loading: eligibilityLoading,
     error: eligibilityError,
     refetch: refetchEligibility,
   } = useQuery<WenjuanPayEligibilityData>(WENJUAN_PAY_ELIGIBILITY, {
@@ -1145,6 +1146,20 @@ export function Lead2026CampEnrollPage({
             </div>
           ) : null}
         </section>
+      </div>
+    );
+  }
+
+  if (
+    !isCampAdmin &&
+    !isCampWechatAdmin &&
+    !isCampCheckinAdmin &&
+    eligibilityLoading &&
+    !campPayUnlocked
+  ) {
+    return (
+      <div className="relative z-10 flex min-h-[50vh] flex-col items-center justify-center gap-3 text-muted-foreground">
+        <p>正在查询本期报名状态…</p>
       </div>
     );
   }
