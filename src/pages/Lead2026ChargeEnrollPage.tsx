@@ -329,7 +329,7 @@ function CourseIntroCard() {
           ))}
         </ol>
         <p className="mt-3 text-muted-foreground">
-          会议链接将于 9月4日 当天下午发送至群内，请提前预留时间，准时进入腾讯会议室。
+          会议链接将于 10月2日 当天下午发送至群内，请提前预留时间，准时进入腾讯会议室。
         </p>
       </div>
     </section>
@@ -1061,7 +1061,7 @@ export function Lead2026ChargeEnrollPage({
           <section className="mt-7 rounded-2xl border border-border/70 bg-muted/20 p-4 text-sm leading-relaxed text-muted-foreground">
             <p className="font-semibold text-foreground/90">课程提醒</p>
             <p className="mt-2">
-              会议链接将于 9月4日 当天下午发送至群内，请提前预留时间，准时进入腾讯会议室。
+              会议链接将于 10月2日 当天下午发送至群内，请提前预留时间，准时进入腾讯会议室。
               迟到 15 分钟将无法进入当期课堂；报名后请全程参与。
             </p>
           </section>
