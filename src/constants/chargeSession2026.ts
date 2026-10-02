@@ -19,8 +19,8 @@ export const CHARGE_SESSION_COURSE_THEME =
   '方案执行过程中电量不足，那就一起充充电吧！';
 export const CHARGE_SESSION_COURSE_TIME = '10月2日（周五）晚 20:00—22:00';
 export const CHARGE_SESSION_COURSE_TIME_LABEL = '10月2日（周五）20:00—22:00';
-export const CHARGE_SESSION_DEADLINE_AT = '2026-10-02T20:00:00+08:00';
-export const CHARGE_SESSION_DEADLINE_LABEL = '10月2日 20:00';
+export const CHARGE_SESSION_DEADLINE_AT = '2026-10-02T18:00:00+08:00';
+export const CHARGE_SESSION_DEADLINE_LABEL = '10月2日 18:00';
 
 export const CHARGE_SESSION_BACKGROUND =
   '孩子的成长，本质上是父母认知与行动的映射。方案的落地效果，取决于父母的理解深度；孩子的转变速度，取决于父母的执行力度。';
