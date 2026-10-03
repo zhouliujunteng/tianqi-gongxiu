@@ -482,8 +482,16 @@ export function Lead2026AdvancedCampEnrollPage({
       ? [ADVANCED_CAMP_PHASE2_PAY_DESCRIPTION, ...originalAliases]
       : originalAliases;
   }, [isPhase2Course, isPhase7Course, isPhase9Course, phase]);
+  /**
+   * 往期二阶共修营的缴费标识：命中即视为「已报名过二阶」，本期免缴费。
+   * 04期（phase9）需识别 01/02/03 期全部历史缴费，故把 phase7（03期）描述一并纳入。
+   */
   const previousPhasePaymentDescriptionAliases = useMemo(
-    () => [ADVANCED_CAMP_PHASE2_PAY_DESCRIPTION, ...getAdvancedCampPayDescriptionAliases(phase)],
+    () => [
+      ADVANCED_CAMP_PHASE7_PAY_DESCRIPTION,
+      ADVANCED_CAMP_PHASE2_PAY_DESCRIPTION,
+      ...getAdvancedCampPayDescriptionAliases(phase),
+    ],
     [phase]
   );
   const paidOkStorageKey = isPhase9Course
@@ -682,12 +690,15 @@ export function Lead2026AdvancedCampEnrollPage({
     ADVANCED_CAMP_PREVIOUS_PAID_BY_USER_LIBRARY,
     {
       variables: { userLibraryId: userLibraryIdForPreviousPayment || '0' },
-      skip: !token || !isPhase7Course || !/^\d+$/.test(userLibraryIdForPreviousPayment),
+      skip:
+        !token ||
+        (!isPhase7Course && !isPhase9Course) ||
+        !/^\d+$/.test(userLibraryIdForPreviousPayment),
       fetchPolicy: 'network-only',
     }
   );
   const previousPhasePaidById = useMemo(() => {
-    if (!isPhase7Course || !miniRow) return false;
+    if ((!isPhase7Course && !isPhase9Course) || !miniRow) return false;
     return (previousPaidByUserLibraryData?.fz_payment_record ?? []).some((record) => {
       if (!isZionPaymentSuccessful(record.status)) return false;
       const description = record.order?.ud_dingdanbeizhu_439d3a ?? record.description;
@@ -695,12 +706,16 @@ export function Lead2026AdvancedCampEnrollPage({
     });
   }, [
     isPhase7Course,
+    isPhase9Course,
     miniRow,
     previousPhasePaymentDescriptionAliases,
     previousPaidByUserLibraryData,
   ]);
   const checkingPreviousPhaseEligibility =
-    isPhase7Course && miniProgramIdValid && miniFound && previousPaidByUserLibraryLoading;
+    (isPhase7Course || isPhase9Course) &&
+    miniProgramIdValid &&
+    miniFound &&
+    previousPaidByUserLibraryLoading;
 
   const apolloClient = useApolloClient();
   const {
