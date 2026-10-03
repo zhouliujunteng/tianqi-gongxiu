@@ -72,6 +72,8 @@ import type {
   GetImageUploadUrlData,
 } from '../types/camp2026';
 import { friendlyRequestErrorMessage } from '../utils/friendlyRequestError';
+import { extractWechatOpenId } from '../payment/selfPay';
+import { useSelfPayPaid } from '../payment/useSelfPayPaid';
 import { isWeixinBrowser } from '../payment/weixinBrowser';
 import { uploadImageViaZion } from '../utils/zionImageUpload';
 
@@ -720,6 +722,18 @@ export function Lead2026CampEnrollPage({
   const pricingIdentity =
     miniIdentity?.trim() || (publicStudentFound ? '公众号学员名单' : null);
   const matchedForCampPricing = miniFound || publicStudentFound;
+
+  /** 自建支付通道：pay-service 回调把订单表状态置为「已支付」，此处补一路已付判定 */
+  const { paid: selfPayPaid } = useSelfPayPaid({
+    enabled: true,
+    userLibraryId: miniRow?.id ?? null,
+    publicAccountId:
+      !miniRow && publicStudentFound ? miniProgramUserId.trim() : null,
+    aliases: campPayDescriptionAliases,
+  });
+  useEffect(() => {
+    if (selfPayPaid) setCampPayUnlocked(true);
+  }, [selfPayPaid]);
   const amountYuan = useMemo(
     () => (publicStudentFound ? 200 : getCampAmountByIdentity(pricingIdentity)),
     [pricingIdentity, publicStudentFound]
@@ -1935,6 +1949,7 @@ export function Lead2026CampEnrollPage({
                           !miniRow && publicStudentFound ? miniProgramUserId.trim() : null
                         }
                         description={campPayDescription}
+                        openId={extractWechatOpenId(meRow)}
                         confirmPaidWithBackend={confirmPaidWithBackend}
                         onPaidMarked={() => setCampPayUnlocked(true)}
                         campWechatContact={campWechatContactForPay}

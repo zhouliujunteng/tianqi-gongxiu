@@ -40,6 +40,12 @@ interface ImportMetaEnv {
   /** 若返回值里订单 id 不在默认字段名中，填顶层键名，如 dingdan_id */
   readonly VITE_WENJUAN_ORDER_CREATE_FLOW_ORDER_ID_KEY?: string;
 
+  /**
+   * 自建微信支付服务地址（如 https://pay.tianqiwushu.cn）。
+   * 配置后网页端 JSAPI 支付走该服务（指定商户号），未配置则继续走 Zion 内置支付。
+   */
+  readonly VITE_PAY_SERVICE_URL?: string;
+
   /** 共修营第三期：后端老师账号 ID（逗号分隔），进入「微信添加」管理页 */
   readonly VITE_CAMP_WECHAT_ADMIN_ACCOUNT_IDS?: string;
 }

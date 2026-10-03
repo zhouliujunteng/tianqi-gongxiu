@@ -23,6 +23,11 @@ import {
   PATCH_WENJUAN_2026_DINGDAN_AMOUNTS,
 } from '../graphql/operations';
 import { parseWechatPaymentMessage } from '../payment/parseWechatPaymentMessage';
+import {
+  createSelfPayOrder,
+  fetchSelfPayStatus,
+  isSelfPayEnabled,
+} from '../payment/selfPay';
 import { invokeWechatJsapiPay, isWeixinBrowser } from '../payment/weixinBrowser';
 import { friendlyRequestErrorMessage } from '../utils/friendlyRequestError';
 
@@ -40,6 +45,8 @@ type Props = {
   paidOkStorageKey?: string;
   h5PendingStorageKey?: string;
   onPaidMarked?: () => void;
+  /** 微信 OAuth 的公众号 openId；启用自建支付通道时必需 */
+  openId?: string | null;
   /**
    * 微信支付 JSAPI 调用成功后：延迟并查询后端支付记录（webhook 异步）。
    * 返回 true 时才写入前端「已付」标记。
@@ -67,6 +74,7 @@ export function WenjuanCampWechatPayCard({
   publicAccountId = null,
   description,
   orderType = WENJUAN_CAMP_ORDER_TYPE,
+  openId = null,
   paidOkStorageKey = WENJUAN_CAMP_PAY_OK_STORAGE_KEY,
   h5PendingStorageKey = WENJUAN_CAMP_WXPAY_H5_PENDING_KEY,
   onPaidMarked,
@@ -81,6 +89,8 @@ export function WenjuanCampWechatPayCard({
 
   const weixin = isWeixinBrowser();
   const payType = wenjuanPayPaymentType(weixin);
+  /** 微信内 + 配置了自建支付服务 → 走自建通道（指定商户号） */
+  const useSelfPay = isSelfPayEnabled() && weixin;
 
   const amountForCreatePay = wenjuanPayAmountForCreateWechatPaymentFromYuan(
     amountYuan
@@ -198,6 +208,58 @@ export function WenjuanCampWechatPayCard({
         throw new Error(`订单 id 格式无效：${orderIdStr}`);
       }
 
+      // 自建支付通道：配置 VITE_PAY_SERVICE_URL 且在微信内打开时，
+      // 绕过 Zion 内置支付，直连自建 pay-service 用指定商户号收款。
+      if (useSelfPay) {
+        if (!openId) {
+          throw new Error('未获取到微信 openId，请在微信内重新打开本页后再支付。');
+        }
+        const selfRes = await createSelfPayOrder({
+          orderId: orderIdStr,
+          amountYuan,
+          description,
+          openId,
+        });
+        if (!selfRes.ok) throw new Error(selfRes.error);
+        if (selfRes.alreadyPaid) {
+          markPaidOk();
+          return;
+        }
+        if (!selfRes.payParams) throw new Error('支付服务未返回支付参数');
+
+        clearBusyInFinally = false;
+        invokeWechatJsapiPay(selfRes.payParams, (ok, msg3) => {
+          if (!ok) {
+            setBusy(false);
+            if (msg3) setErr(msg3);
+            return;
+          }
+          void (async () => {
+            try {
+              // 微信回调可能延迟，轮询查单兜底（最多约 15 秒）
+              let confirmed = false;
+              for (let i = 0; i < 10 && !confirmed; i += 1) {
+                await new Promise((r) => window.setTimeout(r, 1500));
+                const st = await fetchSelfPayStatus(selfRes.outTradeNo);
+                if (st.paid) confirmed = true;
+              }
+              if (confirmed) {
+                markPaidOk();
+              } else {
+                setErr(
+                  '微信已提示支付成功，正在等待支付结果同步；请稍后刷新页面确认，或联系老师核对。'
+                );
+              }
+            } catch {
+              setErr('确认支付结果失败，请稍后刷新页面或重试。');
+            } finally {
+              setBusy(false);
+            }
+          })();
+        });
+        return;
+      }
+
       const createPayVariables = {
         orderId: orderIdStr,
         amount: amountForCreatePay,
@@ -313,7 +375,9 @@ export function WenjuanCampWechatPayCard({
     markPaidOk,
     normalizedPublicAccountId,
     normalizedUserLibraryId,
+    openId,
     serviceSpecialistId,
+    useSelfPay,
     weixin,
   ]);
 
@@ -321,7 +385,10 @@ export function WenjuanCampWechatPayCard({
     return null;
   }
 
-  const payDisabled = busy || !accountId;
+  /** 已配置自建支付服务（不论当前是否微信内） */
+  const selfPayConfigured = isSelfPayEnabled();
+
+  const payDisabled = busy || !accountId || (selfPayConfigured && !weixin);
 
   return (
     <section
@@ -334,7 +401,9 @@ export function WenjuanCampWechatPayCard({
         点击下方按钮即可发起支付。
         {!weixin ? (
           <span className="mt-1 block">
-            当前非微信内置浏览器：将使用 Zion 的 WECHATPAY_MOBILE_WEB（H5）。
+            {selfPayConfigured
+              ? '当前非微信内置浏览器：请在微信内打开本页完成支付。'
+              : '当前非微信内置浏览器：将使用 Zion 的 WECHATPAY_MOBILE_WEB（H5）。'}
           </span>
         ) : null}
       </p>

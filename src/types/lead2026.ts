@@ -30,6 +30,10 @@ export function emptyLeadForm(): Lead2026FormValues {
 export interface MeAccountRow {
   id: string;
   username: string | null;
+  /** 微信 OAuth 绑定信息，形如 { WECHAT: { openId: 'o...' } } */
+  oauth2_user_info_map?: {
+    WECHAT?: { openId?: string | null } | null;
+  } | null;
 }
 
 /** 全局文档表中的品牌 logo 查询 */

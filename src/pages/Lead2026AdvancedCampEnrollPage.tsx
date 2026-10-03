@@ -57,6 +57,8 @@ import type {
   MeAccountRow,
   WenjuanPayEligibilityData,
 } from '../types/lead2026';
+import { extractWechatOpenId } from '../payment/selfPay';
+import { useSelfPayPaid } from '../payment/useSelfPayPaid';
 import { isWeixinBrowser } from '../payment/weixinBrowser';
 import { friendlyRequestErrorMessage } from '../utils/friendlyRequestError';
 
@@ -751,6 +753,14 @@ export function Lead2026AdvancedCampEnrollPage({
     });
   }, [eligibilityData, payDescriptionAliases]);
 
+  /** 自建支付通道：pay-service 回调把订单表状态置为「已支付」，此处补一路已付判定 */
+  const { paid: selfPayPaid } = useSelfPayPaid({
+    enabled: true,
+    userLibraryId: miniRow?.id ?? null,
+    publicAccountId: fallbackPublicAccountId,
+    aliases: payDescriptionAliases,
+  });
+
   const [payUnlocked, setPayUnlocked] = useState(() => {
     try {
       return sessionStorage.getItem(paidOkStorageKey) === '1';
@@ -762,6 +772,10 @@ export function Lead2026AdvancedCampEnrollPage({
   useEffect(() => {
     if (paidViaZion) setPayUnlocked(true);
   }, [paidViaZion]);
+
+  useEffect(() => {
+    if (selfPayPaid) setPayUnlocked(true);
+  }, [selfPayPaid]);
 
   useEffect(() => {
     if (!token || paidViaZion) return;
@@ -1171,7 +1185,8 @@ export function Lead2026AdvancedCampEnrollPage({
     );
   }
 
-  const paid = paidViaZion || payUnlocked || previousPhasePaidById;
+  const paid =
+    paidViaZion || selfPayPaid || payUnlocked || previousPhasePaidById;
   const showWechatPayCard = isWenjuanWechatPayEnabled();
   const showPayCompleteFallback =
     !showWechatPayCard && isWenjuanPayManualClientConfirmAllowed();
@@ -1385,6 +1400,7 @@ export function Lead2026AdvancedCampEnrollPage({
                       publicAccountId={fallbackPublicAccountId}
                       description={payDescription}
                       orderType={WENJUAN_ADVANCED_CAMP_ORDER_TYPE}
+                      openId={extractWechatOpenId(meRow)}
                       paidOkStorageKey={paidOkStorageKey}
                       h5PendingStorageKey={h5PendingStorageKey}
                       confirmPaidWithBackend={confirmPaidWithBackend}

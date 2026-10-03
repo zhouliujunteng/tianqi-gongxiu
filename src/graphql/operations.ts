@@ -26,6 +26,7 @@ export const ME_ACCOUNT = gql`
     account(where: { id: { _eq: $accountId } }, limit: 1) {
       id
       username
+      oauth2_user_info_map
     }
   }
 `;
