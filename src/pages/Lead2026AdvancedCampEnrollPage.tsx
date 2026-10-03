@@ -682,6 +682,11 @@ export function Lead2026AdvancedCampEnrollPage({
     [pricingIdentity]
   );
   const userLibraryIdForPreviousPayment = String(miniRow?.id ?? '').trim();
+  /** 仅公众号学员名单、无用户库记录时的公众号ID；无值时用哨兵避免误匹配空值 */
+  const publicAccountIdForPreviousPayment = !miniFound && miniProgramIdValid ? miniProgramUserId.trim() : '';
+  const hasPreviousPaymentIdentifier =
+    /^\d+$/.test(userLibraryIdForPreviousPayment) ||
+    Boolean(publicAccountIdForPreviousPayment);
   const {
     data: previousPaidByUserLibraryData,
     loading: previousPaidByUserLibraryLoading,
@@ -689,32 +694,39 @@ export function Lead2026AdvancedCampEnrollPage({
   } = useQuery<AdvancedCampPreviousPaymentByUserLibraryData>(
     ADVANCED_CAMP_PREVIOUS_PAID_BY_USER_LIBRARY,
     {
-      variables: { userLibraryId: userLibraryIdForPreviousPayment || '0' },
+      variables: {
+        userLibraryId: /^\d+$/.test(userLibraryIdForPreviousPayment)
+          ? userLibraryIdForPreviousPayment
+          : '0',
+        publicAccountId: publicAccountIdForPreviousPayment || '__none__',
+      },
       skip:
         !token ||
         (!isPhase7Course && !isPhase9Course) ||
-        !/^\d+$/.test(userLibraryIdForPreviousPayment),
+        !hasPreviousPaymentIdentifier,
       fetchPolicy: 'network-only',
     }
   );
   const previousPhasePaidById = useMemo(() => {
-    if ((!isPhase7Course && !isPhase9Course) || !miniRow) return false;
+    if ((!isPhase7Course && !isPhase9Course) || !hasPreviousPaymentIdentifier) {
+      return false;
+    }
     return (previousPaidByUserLibraryData?.fz_payment_record ?? []).some((record) => {
       if (!isZionPaymentSuccessful(record.status)) return false;
       const description = record.order?.ud_dingdanbeizhu_439d3a ?? record.description;
       return isDescriptionMatch(description, previousPhasePaymentDescriptionAliases);
     });
   }, [
+    hasPreviousPaymentIdentifier,
     isPhase7Course,
     isPhase9Course,
-    miniRow,
     previousPhasePaymentDescriptionAliases,
     previousPaidByUserLibraryData,
   ]);
   const checkingPreviousPhaseEligibility =
     (isPhase7Course || isPhase9Course) &&
     miniProgramIdValid &&
-    miniFound &&
+    hasPreviousPaymentIdentifier &&
     previousPaidByUserLibraryLoading;
 
   const apolloClient = useApolloClient();

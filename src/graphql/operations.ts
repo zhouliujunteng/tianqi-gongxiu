@@ -384,7 +384,10 @@ export const WENJUAN_PAY_ELIGIBILITY = gql`
 
 /** 按报名用户库 ID 查询既往二阶课程的成功支付记录（不限金额），用于本期往期已缴费学员免缴费。 */
 export const ADVANCED_CAMP_PREVIOUS_PAID_BY_USER_LIBRARY = gql`
-  query AdvancedCampPreviousPaidByUserLibrary($userLibraryId: bigint!) {
+  query AdvancedCampPreviousPaidByUserLibrary(
+    $userLibraryId: bigint!
+    $publicAccountId: String!
+  ) {
     fz_payment_record(
       where: {
         _and: [
@@ -392,7 +395,10 @@ export const ADVANCED_CAMP_PREVIOUS_PAID_BY_USER_LIBRARY = gql`
           {
             order: {
               ud_dingdanleixing_3fb8b8: { _eq: "2026二阶共修营" }
-              ud_yonghuxinxi_yonghuku_55773d: { _eq: $userLibraryId }
+              _or: [
+                { ud_yonghuxinxi_yonghuku_55773d: { _eq: $userLibraryId } }
+                { ud_gongzhonghaoid_665d9b: { _eq: $publicAccountId } }
+              ]
             }
           }
         ]
