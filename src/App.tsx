@@ -101,12 +101,28 @@ function shouldOpenAdvancedCampPhase7Page(): boolean {
   }
 }
 
+/** 二阶共修营 04期（2026-10-06 开营）：?scene=camp&phase=9 */
+function shouldOpenAdvancedCampPhase9Page(): boolean {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    return (
+      (params.get('scene') === 'camp' ||
+        params.get('page') === 'camp' ||
+        params.get('tab') === 'camp') &&
+      params.get('phase') === '9'
+    );
+  } catch {
+    return false;
+  }
+}
+
 export function App() {
   const client = useMemo(() => createApolloClient(), []);
   const isCampPage = useMemo(() => shouldOpenCampPage(), []);
   const isAdvancedCampPage = useMemo(() => shouldOpenAdvancedCampPage(), []);
   const isAdvancedCampPhase2Page = useMemo(() => shouldOpenAdvancedCampPhase2Page(), []);
   const isAdvancedCampPhase7Page = useMemo(() => shouldOpenAdvancedCampPhase7Page(), []);
+  const isAdvancedCampPhase9Page = useMemo(() => shouldOpenAdvancedCampPhase9Page(), []);
   const isChargePage = useMemo(() => shouldOpenChargePage(), []);
   const loggedInUserId = getZionJwtUserId();
   const [, bump] = useState(0);
@@ -238,7 +254,13 @@ export function App() {
     <ApolloProvider client={client}>
       <OrganicBackgroundBlobs />
       <div className="texture-overlay" aria-hidden />
-      {isAdvancedCampPhase7Page ? (
+      {isAdvancedCampPhase9Page ? (
+        <Lead2026AdvancedCampEnrollPage
+          courseVariant="phase9"
+          wechatOAuthExchangePending={wechatOAuthExchangePending}
+          wechatOAuthExchangeError={wechatOAuthExchangeError}
+        />
+      ) : isAdvancedCampPhase7Page ? (
         <Lead2026AdvancedCampEnrollPage
           courseVariant="phase7"
           wechatOAuthExchangePending={wechatOAuthExchangePending}

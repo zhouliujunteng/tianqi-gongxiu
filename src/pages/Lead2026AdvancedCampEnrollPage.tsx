@@ -61,7 +61,7 @@ import { isWeixinBrowser } from '../payment/weixinBrowser';
 import { friendlyRequestErrorMessage } from '../utils/friendlyRequestError';
 
 type Props = {
-  courseVariant?: 'original' | 'phase2' | 'phase7';
+  courseVariant?: 'original' | 'phase2' | 'phase7' | 'phase9';
   wechatOAuthExchangePending?: boolean;
   wechatOAuthExchangeError?: string | null;
 };
@@ -90,6 +90,15 @@ const ADVANCED_CAMP_PHASE7_SCHEDULE = {
 };
 const ADVANCED_CAMP_PHASE7_ENROLLMENT_DEADLINE_AT =
   '2026-08-19T18:00:00+08:00';
+const ADVANCED_CAMP_PHASE9_LABEL = '04期';
+const ADVANCED_CAMP_PHASE9_PAY_DESCRIPTION = '2026二阶共修营04期-20261006';
+const ADVANCED_CAMP_PHASE9_SCHEDULE = {
+  dateRange: '10 月 6 日至 10 月 12 日',
+  deadline: '10 月 5 日 18:00',
+  timeSlots: ['06:00—08:00', '20:00—22:00'],
+};
+const ADVANCED_CAMP_PHASE9_ENROLLMENT_DEADLINE_AT =
+  '2026-10-05T18:00:00+08:00';
 const ADVANCED_CAMP_WECHAT_ADMIN_ACCOUNT_IDS = new Set([
   '1000000000009519',
   '10000000000009519',
@@ -256,12 +265,14 @@ function CourseDetail({
   schedule,
   isPhase2Course,
   isPhase7Course,
+  isPhase9Course,
 }: {
   title: string;
   phaseLabel: string;
   schedule: { dateRange: string; deadline: string; timeSlots: string[] };
   isPhase2Course: boolean;
   isPhase7Course: boolean;
+  isPhase9Course: boolean;
 }) {
   return (
     <article className="space-y-6">
@@ -387,10 +398,10 @@ function CourseDetail({
           <div className="mt-4 rounded-2xl border border-primary/25 bg-primary/5 p-4 text-sm leading-relaxed text-foreground/90">
             <p className="font-semibold text-primary">收费标准</p>
             <p className="mt-2">
-              未建档家长：学费 1680 元{isPhase7Course ? '。' : '，支持课程复训 3 次。'}
+              未建档家长：学费 1680 元{isPhase7Course || isPhase9Course ? '。' : '，支持课程复训 3 次。'}
             </p>
             <p className="mt-1">
-              已建档家长：特惠学费 680 元{isPhase7Course ? '。' : '，支持课程复训 3 次。'}
+              已建档家长：特惠学费 680 元{isPhase7Course || isPhase9Course ? '。' : '，支持课程复训 3 次。'}
             </p>
           </div>
         </div>
@@ -415,6 +426,7 @@ export function Lead2026AdvancedCampEnrollPage({
 }: Props = {}) {
   const isPhase2Course = courseVariant === 'phase2';
   const isPhase7Course = courseVariant === 'phase7';
+  const isPhase9Course = courseVariant === 'phase9';
   const token = getZionJwt();
   const jwtAccountId = getZionJwtUserId();
   const wechatOAuthConfigured = Boolean(
@@ -424,66 +436,84 @@ export function Lead2026AdvancedCampEnrollPage({
   const wechatUrlMobile = buildWechatOAuthUrlForWeixinBrowser();
   const phase = useMemo(() => getAdvancedCampPhaseFromLocation(), []);
   const originalPhaseLabel = useMemo(() => getAdvancedCampPhaseLabel(phase), [phase]);
-  const phaseLabel = isPhase7Course
+  const phaseLabel = isPhase9Course
+    ? ADVANCED_CAMP_PHASE9_LABEL
+    : isPhase7Course
     ? ADVANCED_CAMP_PHASE7_LABEL
     : isPhase2Course
       ? ADVANCED_CAMP_PHASE2_LABEL
       : originalPhaseLabel;
-  const courseTitle = isPhase7Course
+  const courseTitle = isPhase9Course
+    ? `《透过现象·直击本质》二阶共修营${ADVANCED_CAMP_PHASE9_LABEL}`
+    : isPhase7Course
     ? `《透过现象·直击本质》二阶共修营${ADVANCED_CAMP_PHASE7_LABEL}`
     : isPhase2Course
       ? `《透过现象·直击本质》二阶共修营${ADVANCED_CAMP_PHASE2_LABEL}`
       : getAdvancedCampTitle(phase);
   const schedule = useMemo(
     () =>
-      isPhase7Course
+      isPhase9Course
+        ? ADVANCED_CAMP_PHASE9_SCHEDULE
+        : isPhase7Course
         ? ADVANCED_CAMP_PHASE7_SCHEDULE
         : isPhase2Course
           ? ADVANCED_CAMP_PHASE2_SCHEDULE
           : getAdvancedCampSchedule(phase),
-    [isPhase2Course, isPhase7Course, phase]
+    [isPhase2Course, isPhase7Course, isPhase9Course, phase]
   );
   const payDescription = useMemo(
     () =>
-      isPhase7Course
+      isPhase9Course
+        ? ADVANCED_CAMP_PHASE9_PAY_DESCRIPTION
+        : isPhase7Course
         ? ADVANCED_CAMP_PHASE7_PAY_DESCRIPTION
         : isPhase2Course
         ? ADVANCED_CAMP_PHASE2_PAY_DESCRIPTION
         : getAdvancedCampPayDescription(phase),
-    [isPhase2Course, isPhase7Course, phase]
+    [isPhase2Course, isPhase7Course, isPhase9Course, phase]
   );
   const payDescriptionAliases = useMemo(() => {
     const originalAliases = getAdvancedCampPayDescriptionAliases(phase);
-    return isPhase7Course
+    return isPhase9Course
+      ? [ADVANCED_CAMP_PHASE9_PAY_DESCRIPTION]
+      : isPhase7Course
       ? [ADVANCED_CAMP_PHASE7_PAY_DESCRIPTION]
       : isPhase2Course
       ? [ADVANCED_CAMP_PHASE2_PAY_DESCRIPTION, ...originalAliases]
       : originalAliases;
-  }, [isPhase2Course, isPhase7Course, phase]);
+  }, [isPhase2Course, isPhase7Course, isPhase9Course, phase]);
   const previousPhasePaymentDescriptionAliases = useMemo(
     () => [ADVANCED_CAMP_PHASE2_PAY_DESCRIPTION, ...getAdvancedCampPayDescriptionAliases(phase)],
     [phase]
   );
-  const paidOkStorageKey = isPhase7Course
+  const paidOkStorageKey = isPhase9Course
+    ? 'tqwj_advanced_camp_phase9_paid_ok'
+    : isPhase7Course
     ? 'tqwj_advanced_camp_phase7_paid_ok'
     : WENJUAN_ADVANCED_CAMP_PAY_OK_STORAGE_KEY;
-  const h5PendingStorageKey = isPhase7Course
+  const h5PendingStorageKey = isPhase9Course
+    ? 'tqwj_advanced_camp_phase9_wxpay_h5_pending'
+    : isPhase7Course
     ? 'tqwj_advanced_camp_phase7_wxpay_h5_pending'
     : WENJUAN_ADVANCED_CAMP_WXPAY_H5_PENDING_KEY;
   const [enrollGateNowMs, setEnrollGateNowMs] = useState(() => Date.now());
-  const timeEnrollmentClosed = isPhase7Course
+  const timeEnrollmentClosed = isPhase9Course
+    ? enrollGateNowMs >= Date.parse(ADVANCED_CAMP_PHASE9_ENROLLMENT_DEADLINE_AT)
+    : isPhase7Course
     ? enrollGateNowMs >= Date.parse(ADVANCED_CAMP_PHASE7_ENROLLMENT_DEADLINE_AT)
     : isPhase2Course
       ? enrollGateNowMs >= Date.parse(ADVANCED_CAMP_PHASE2_ENROLLMENT_DEADLINE_AT)
       : isAdvancedCampEnrollmentClosed(phase, enrollGateNowMs);
   const enrollmentDeadlineMs = useMemo(
     () =>
-      isPhase7Course
+      isPhase9Course
+        ? Date.parse(ADVANCED_CAMP_PHASE9_ENROLLMENT_DEADLINE_AT)
+        : isPhase7Course
         ? Date.parse(ADVANCED_CAMP_PHASE7_ENROLLMENT_DEADLINE_AT)
         : isPhase2Course
         ? Date.parse(ADVANCED_CAMP_PHASE2_ENROLLMENT_DEADLINE_AT)
         : getAdvancedCampEnrollmentDeadlineAtMs(phase),
-    [isPhase2Course, isPhase7Course, phase]
+    [isPhase2Course, isPhase7Course, isPhase9Course, phase]
   );
 
   useLayoutEffect(() => {
@@ -1156,6 +1186,7 @@ export function Lead2026AdvancedCampEnrollPage({
         schedule={schedule}
         isPhase2Course={isPhase2Course}
         isPhase7Course={isPhase7Course}
+        isPhase9Course={isPhase9Course}
       />
 
       <section className="mt-7 rounded-tl-[1.75rem] rounded-tr-[1.25rem] rounded-br-[2rem] rounded-bl-[1.35rem] border border-border bg-card p-5 shadow-organic-sm md:p-10">
