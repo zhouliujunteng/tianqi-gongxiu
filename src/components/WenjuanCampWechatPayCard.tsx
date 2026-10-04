@@ -56,6 +56,20 @@ type Props = {
   campWechatContact?: CampWechatContact | null;
 };
 
+/** 把自建支付服务返回的微信错误码翻译成家长看得懂的提示 */
+function friendlySelfPayError(raw: string): string {
+  if (/appid和openid不匹配|APPID_MCHID_NOT_MATCH|appid.*mchid.*不匹配/i.test(raw)) {
+    return '当前微信身份与收款公众号不匹配。请在微信内重新打开本页并完成授权登录后支付。';
+  }
+  if (/缺少 openId|openId/i.test(raw)) {
+    return '未获取到微信身份，请在微信内重新打开本页后支付。';
+  }
+  if (/配置不完整|未配置/.test(raw)) {
+    return '支付通道未就绪，请联系老师处理。';
+  }
+  return raw;
+}
+
 function parseOrderIdFromInsert(
   data:
     | { insert_ud_dingdan_b6a218_one?: { id?: string | number | null } }
@@ -220,7 +234,9 @@ export function WenjuanCampWechatPayCard({
           description,
           openId,
         });
-        if (!selfRes.ok) throw new Error(selfRes.error);
+        if (!selfRes.ok) {
+          throw new Error(friendlySelfPayError(selfRes.error));
+        }
         if (selfRes.alreadyPaid) {
           markPaidOk();
           return;
