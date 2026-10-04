@@ -27,6 +27,8 @@ const MCH_ID = (process.env.WECHAT_MCH_ID || '').trim();
 const APP_ID = (process.env.WECHAT_APP_ID || '').trim();
 const API_V3_KEY = (process.env.WECHAT_API_V3_KEY || '').trim();
 const SERIAL_NO = (process.env.WECHAT_SERIAL_NO || '').trim();
+/** 公众号 AppSecret：用于 OAuth code 换 openId（JSAPI 下单必需） */
+const APP_SECRET = (process.env.WECHAT_APP_SECRET || '').trim();
 const NOTIFY_URL = (process.env.WECHAT_NOTIFY_URL || '').trim();
 const ZION_GRAPHQL_URL = (
   process.env.ZION_GRAPHQL_URL ||
@@ -294,6 +296,7 @@ app.get('/health', (req, res) => {
     mchId: MCH_ID || null,
     appId: APP_ID || null,
     notifyUrl: NOTIFY_URL || null,
+    appSecretConfigured: Boolean(APP_SECRET),
     configComplete: missingConfig().length === 0 && Boolean(NOTIFY_URL),
     missingConfig: missingConfig(),
   });
@@ -437,6 +440,43 @@ app.post('/api/pay/notify', express.text({ type: '*/*' }), async (req, res) => {
  * 查单（前端兜底轮询）
  * query: outTradeNo 或 orderId
  */
+/**
+ * 微信 OAuth（snsapi_base）code 换 openId。
+ * 仅用于构造 JSAPI 下单所需的 payer.openid，不下发 access_token 给前端。
+ */
+app.get('/api/oauth/openid', async (req, res) => {
+  try {
+    const code = String(req.query?.code ?? '').trim();
+    if (!code) {
+      res.status(400).json({ error: '缺少 code' });
+      return;
+    }
+    if (!APP_SECRET) {
+      res.status(500).json({ error: '未配置 WECHAT_APP_SECRET' });
+      return;
+    }
+    const url =
+      'https://api.weixin.qq.com/sns/oauth2/access_token' +
+      `?appid=${encodeURIComponent(APP_ID)}` +
+      `&secret=${encodeURIComponent(APP_SECRET)}` +
+      `&code=${encodeURIComponent(code)}` +
+      '&grant_type=authorization_code';
+    const r = await fetch(url);
+    const j = await r.json().catch(() => null);
+    if (j?.openid) {
+      res.json({ ok: true, openId: String(j.openid) });
+      return;
+    }
+    res.status(502).json({
+      error: j?.errmsg ? `换取 openId 失败：${j.errmsg}` : '换取 openId 失败',
+      errcode: j?.errcode ?? null,
+    });
+  } catch (e) {
+    console.error('[pay-service] /api/oauth/openid 异常：', e);
+    res.status(500).json({ error: e?.message ?? String(e) });
+  }
+});
+
 app.get('/api/pay/status', async (req, res) => {
   try {
     const miss = missingConfig();

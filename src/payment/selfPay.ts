@@ -44,7 +44,7 @@ export type SelfPayJsapiParams = {
 // 等 Zion 里 account.oauth2_user_info_map 读权限开好后，再改成 https://pay.tianqiwushu.cn
 const DEFAULT_PAY_SERVICE_URL = '';
 
-function serviceBaseUrl(): string {
+export function serviceBaseUrl(): string {
   const raw = String(import.meta.env.VITE_PAY_SERVICE_URL ?? '').trim().replace(/\/+$/, '');
   return raw || DEFAULT_PAY_SERVICE_URL;
 }

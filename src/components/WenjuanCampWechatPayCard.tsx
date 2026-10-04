@@ -28,6 +28,7 @@ import {
   fetchSelfPayStatus,
   isSelfPayEnabled,
 } from '../payment/selfPay';
+import { useWechatOpenId } from '../payment/useWechatOpenId';
 import { invokeWechatJsapiPay, isWeixinBrowser } from '../payment/weixinBrowser';
 import { friendlyRequestErrorMessage } from '../utils/friendlyRequestError';
 
@@ -105,6 +106,9 @@ export function WenjuanCampWechatPayCard({
   const payType = wenjuanPayPaymentType(weixin);
   /** 微信内 + 配置了自建支付服务 → 走自建通道（指定商户号） */
   const useSelfPay = isSelfPayEnabled() && weixin;
+  /** 自建通道需要 openId；Zion 读不到时由静默 OAuth 换取 */
+  const selfOpenId = useWechatOpenId();
+  const effectiveOpenId = openId?.trim() || selfOpenId;
 
   const amountForCreatePay = wenjuanPayAmountForCreateWechatPaymentFromYuan(
     amountYuan
@@ -229,7 +233,7 @@ export function WenjuanCampWechatPayCard({
           orderId: orderIdStr,
           amountYuan,
           description,
-          openId,
+          openId: effectiveOpenId ?? undefined,
           clientUrl: typeof window !== 'undefined' ? window.location.href : '',
         });
         if (!selfRes.ok) {
@@ -402,7 +406,7 @@ export function WenjuanCampWechatPayCard({
     markPaidOk,
     normalizedPublicAccountId,
     normalizedUserLibraryId,
-    openId,
+    effectiveOpenId,
     serviceSpecialistId,
     useSelfPay,
     weixin,
