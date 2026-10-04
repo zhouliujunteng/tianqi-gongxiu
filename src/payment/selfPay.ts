@@ -40,9 +40,7 @@ export type SelfPayJsapiParams = {
  * 构建期读不到 VITE_PAY_SERVICE_URL，因此这里兜底写死；如需临时停用，
  * 把下面常量改为空字符串即可（或在 Zeabur 配 VITE_PAY_SERVICE_URL 覆盖）。
  */
-// 默认留空，暂时走 Zion 内置支付；
-// 等 Zion 里 account.oauth2_user_info_map 读权限开好后，再改成 https://pay.tianqiwushu.cn
-const DEFAULT_PAY_SERVICE_URL = '';
+const DEFAULT_PAY_SERVICE_URL = 'https://pay.tianqiwushu.cn';
 
 export function serviceBaseUrl(): string {
   const raw = String(import.meta.env.VITE_PAY_SERVICE_URL ?? '').trim().replace(/\/+$/, '');
