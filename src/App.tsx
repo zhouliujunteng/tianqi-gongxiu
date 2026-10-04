@@ -12,6 +12,7 @@ import { consumeJwtFromUrl, getZionJwt, setZionJwt } from './auth/zionJwt';
 import { createApolloClient, isZionConfigured } from './apollo/client';
 import { LoggedInUserWatermark } from './components/LoggedInUserWatermark';
 import { OrganicBackgroundBlobs } from './components/OrganicBackgroundBlobs';
+import { consumePayOpenIdCallback } from './payment/useWechatOpenId';
 import { LOGIN_WITH_WECHAT } from './graphql/operations';
 import { Lead2026AdvancedCampEnrollPage } from './pages/Lead2026AdvancedCampEnrollPage';
 import { Lead2026CampEnrollPage } from './pages/Lead2026CampEnrollPage';
@@ -136,6 +137,9 @@ export function App() {
     if (!isZionConfigured()) return;
 
     captureInviterRefFromUrl();
+    // 自建支付通道的静默 OAuth 回跳：先把 code 收走换 openId，
+    // 否则下面的 Zion 登录会抢用同一个 code（code 只能用一次）
+    if (consumePayOpenIdCallback()) return;
     if (consumeJwtFromUrl()) {
       setWechatOAuthExchangePending(false);
       setWechatOAuthExchangeError(null);

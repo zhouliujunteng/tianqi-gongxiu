@@ -40,6 +40,23 @@ function storeWechatOpenId(openId: string): void {
   }
 }
 
+/** openId 就绪事件：App 里完成换取后广播，让后渲染的支付卡片拿到值 */
+const OPENID_READY_EVENT = 'tqwj:wechat-openid-ready';
+/** 换取进行中的标记（避免渲染晚于 App 的组件又发起一次跳转） */
+let inFlight = false;
+
+export function hasInFlightOpenIdExchange(): boolean {
+  return inFlight;
+}
+
+function notifyOpenIdReady(openId: string): void {
+  try {
+    window.dispatchEvent(new CustomEvent<string>(OPENID_READY_EVENT, { detail: openId }));
+  } catch {
+    /* ignore */
+  }
+}
+
 async function exchangeCodeForOpenId(code: string): Promise<string | null> {
   const base = serviceBaseUrl();
   if (!base) return null;
@@ -52,6 +69,37 @@ async function exchangeCodeForOpenId(code: string): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+/**
+ * 在 App 的登录逻辑之前调用：如果本次回跳是用来换 openId 的，
+ * 立刻擦掉 URL 上的 code 并换取，返回 true 表示「这个 code 已被消费，别再拿去登录」。
+ */
+export function consumePayOpenIdCallback(): boolean {
+  const sp = new URLSearchParams(window.location.search);
+  const code = sp.get('code')?.trim();
+  const state = sp.get('state')?.trim();
+  if (!code || state !== OAUTH_STATE) return false;
+
+  sp.delete('code');
+  sp.delete('state');
+  const q = sp.toString();
+  window.history.replaceState(
+    {},
+    document.title,
+    `${window.location.pathname}${q ? `?${q}` : ''}${window.location.hash}`
+  );
+
+  inFlight = true;
+  void (async () => {
+    const got = await exchangeCodeForOpenId(code);
+    inFlight = false;
+    if (got) {
+      storeWechatOpenId(got);
+      notifyOpenIdReady(got);
+    }
+  })();
+  return true;
 }
 
 function buildSilentOAuthUrl(redirectUri: string): string {
@@ -75,27 +123,20 @@ export function useWechatOpenId(): string | null {
     if (openId) return;
     if (!isSelfPayEnabled() || !isWeixinBrowser()) return;
 
-    const sp = new URLSearchParams(window.location.search);
-    const code = sp.get('code')?.trim();
-    const state = sp.get('state')?.trim();
+    // App 里已经接管 code 并正在换取：等它的广播即可，别再跳转
+    if (hasInFlightOpenIdExchange()) {
+      const onReady = (e: Event): void => {
+        const v = (e as CustomEvent<string>).detail;
+        if (v) setOpenId(v);
+      };
+      window.addEventListener(OPENID_READY_EVENT, onReady);
+      return () => window.removeEventListener(OPENID_READY_EVENT, onReady);
+    }
 
-    if (code && state === OAUTH_STATE) {
-      // 立刻擦掉 code，避免 App 里 Zion 登录逻辑抢用同一个 code（code 只能用一次）
-      sp.delete('code');
-      sp.delete('state');
-      const q = sp.toString();
-      window.history.replaceState(
-        {},
-        document.title,
-        `${window.location.pathname}${q ? `?${q}` : ''}${window.location.hash}`
-      );
-      void (async () => {
-        const got = await exchangeCodeForOpenId(code);
-        if (got) {
-          storeWechatOpenId(got);
-          setOpenId(got);
-        }
-      })();
+    // 可能换取已完成但本组件是后挂载的
+    const stored = getStoredWechatOpenId();
+    if (stored) {
+      setOpenId(stored);
       return;
     }
 

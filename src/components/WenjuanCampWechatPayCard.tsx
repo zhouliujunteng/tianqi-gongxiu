@@ -229,6 +229,10 @@ export function WenjuanCampWechatPayCard({
       // 自建支付通道：绕过 Zion 内置支付，直连自建 pay-service 用指定商户号收款。
       // 有 openId 时走 JSAPI；没有时自动降级为 H5 支付。
       if (useSelfPay) {
+        // 没有 openId 时不要下单：服务端会降级成 H5，而 166 商户号没开 H5 产品
+        if (!effectiveOpenId) {
+          throw new Error('正在获取微信支付身份，请稍等几秒后重试；若一直如此，请重新打开本页。');
+        }
         const selfRes = await createSelfPayOrder({
           orderId: orderIdStr,
           amountYuan,
