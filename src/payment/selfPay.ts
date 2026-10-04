@@ -31,8 +31,17 @@ export type SelfPayJsapiParams = {
   paySign: string;
 };
 
+/**
+ * 默认支付服务地址。
+ * Zeabur 自动生成的 Dockerfile 不会拷贝 `.env.production` 这类点文件，
+ * 构建期读不到 VITE_PAY_SERVICE_URL，因此这里兜底写死；如需临时停用，
+ * 把下面常量改为空字符串即可（或在 Zeabur 配 VITE_PAY_SERVICE_URL 覆盖）。
+ */
+const DEFAULT_PAY_SERVICE_URL = 'https://pay.tianqiwushu.cn';
+
 function serviceBaseUrl(): string {
-  return String(import.meta.env.VITE_PAY_SERVICE_URL ?? '').trim().replace(/\/+$/, '');
+  const raw = String(import.meta.env.VITE_PAY_SERVICE_URL ?? '').trim().replace(/\/+$/, '');
+  return raw || DEFAULT_PAY_SERVICE_URL;
 }
 
 /** 从帐号行取出公众号 openId（微信内授权登录后才有；JSAPI 下单必需） */
