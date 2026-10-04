@@ -222,17 +222,15 @@ export function WenjuanCampWechatPayCard({
         throw new Error(`订单 id 格式无效：${orderIdStr}`);
       }
 
-      // 自建支付通道：配置 VITE_PAY_SERVICE_URL 且在微信内打开时，
-      // 绕过 Zion 内置支付，直连自建 pay-service 用指定商户号收款。
+      // 自建支付通道：绕过 Zion 内置支付，直连自建 pay-service 用指定商户号收款。
+      // 有 openId 时走 JSAPI；没有时自动降级为 H5 支付。
       if (useSelfPay) {
-        if (!openId) {
-          throw new Error('未获取到微信 openId，请在微信内重新打开本页后再支付。');
-        }
         const selfRes = await createSelfPayOrder({
           orderId: orderIdStr,
           amountYuan,
           description,
           openId,
+          clientUrl: typeof window !== 'undefined' ? window.location.href : '',
         });
         if (!selfRes.ok) {
           throw new Error(friendlySelfPayError(selfRes.error));
@@ -241,6 +239,19 @@ export function WenjuanCampWechatPayCard({
           markPaidOk();
           return;
         }
+
+        // H5 支付：跳转到微信 APP，支付完成后回跳
+        if (selfRes.h5Url) {
+          try {
+            sessionStorage.setItem(h5PendingStorageKey, '1');
+          } catch {
+            /* ignore */
+          }
+          window.location.assign(selfRes.h5Url);
+          return;
+        }
+
+        // JSAPI（必须有 payParams）
         if (!selfRes.payParams) throw new Error('支付服务未返回支付参数');
 
         clearBusyInFinally = false;

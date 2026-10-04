@@ -222,6 +222,7 @@ async function markOrderPaid(orderId) {
  * ------------------------------------------------------------------ */
 
 const app = express();
+app.set('trust proxy', true);
 app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', ALLOWED_ORIGIN);
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -245,6 +246,47 @@ function orderIdFromTradeNo(outTradeNo) {
   return m ? m[1] : null;
 }
 
+function clientIpFromRequest(req) {
+  const xf = Array.isArray(req.headers['x-forwarded-for'])
+    ? req.headers['x-forwarded-for'][0]
+    : req.headers['x-forwarded-for'];
+  if (xf) return String(xf).split(',')[0].trim();
+  return req.socket?.remoteAddress || '';
+}
+
+async function createBaseWechatOrder(orderId, amountYuan, description, extraSuffix = '') {
+  const total = Math.round(Number(amountYuan) * 100);
+  if (!Number.isFinite(total) || total <= 0) {
+    throw new Error('amountYuan 无效');
+  }
+  let baseTradeNo = outTradeNoOf(orderId, extraSuffix);
+  const query = await wechatRequest(
+    'GET',
+    `/v3/pay/transactions/out-trade-no/${encodeURIComponent(baseTradeNo)}?mchid=${MCH_ID}`,
+    undefined
+  );
+  if (query.status === 200 && query.json) {
+    if (query.json.trade_state === 'SUCCESS') {
+      return { alreadyPaid: true, outTradeNo: baseTradeNo };
+    }
+    if (['CLOSED', 'REVOKED', 'PAYERROR'].includes(query.json.trade_state)) {
+      baseTradeNo = outTradeNoOf(orderId, `R${Date.now().toString().slice(-6)}`);
+    }
+  }
+  const body = {
+    appid: APP_ID,
+    mchid: MCH_ID,
+    description: String(description || '天启无书课程报名').slice(0, 127),
+    out_trade_no: baseTradeNo,
+    time_expire: new Date(Date.now() + 30 * 60 * 1000).toISOString().replace(/\.\d{3}Z$/, '+08:00'),
+    attach: String(orderId),
+    notify_url: NOTIFY_URL,
+    support_fapiao: false,
+    amount: { total, currency: 'CNY' },
+  };
+  return { body, outTradeNo: baseTradeNo, total };
+}
+
 app.get('/health', (req, res) => {
   res.json({
     ok: true,
@@ -258,8 +300,9 @@ app.get('/health', (req, res) => {
 });
 
 /**
- * JSAPI 下单
- * body: { orderId, amountYuan, description, openId }
+ * 创建支付订单
+ * body: { orderId, amountYuan, description, openId?, clientUrl? }
+ * openId 存在 → 微信内 JSAPI；不存在 → H5 支付
  */
 app.post('/api/pay/jsapi', async (req, res) => {
   try {
@@ -268,18 +311,9 @@ app.post('/api/pay/jsapi', async (req, res) => {
       res.status(500).json({ error: `支付服务配置不完整：${miss.join(', ')}` });
       return;
     }
-    const { orderId, amountYuan, description, openId } = req.body ?? {};
+    const { orderId, amountYuan, description, openId, clientUrl } = req.body ?? {};
     if (!orderId || !/^\d+$/.test(String(orderId))) {
       res.status(400).json({ error: 'orderId 无效' });
-      return;
-    }
-    const total = Math.round(Number(amountYuan) * 100);
-    if (!Number.isFinite(total) || total <= 0) {
-      res.status(400).json({ error: 'amountYuan 无效' });
-      return;
-    }
-    if (!openId) {
-      res.status(400).json({ error: '缺少 openId，请在微信内打开页面后重试' });
       return;
     }
     if (!NOTIFY_URL) {
@@ -287,59 +321,70 @@ app.post('/api/pay/jsapi', async (req, res) => {
       return;
     }
 
-    // 同一订单重复下单：先查一次，已支付直接返回；已关闭则换 out_trade_no 后缀
-    let baseTradeNo = outTradeNoOf(orderId);
-    const query = await wechatRequest(
-      'GET',
-      `/v3/pay/transactions/out-trade-no/${encodeURIComponent(baseTradeNo)}?mchid=${MCH_ID}`,
-      undefined
-    );
-    if (query.status === 200 && query.json) {
-      if (query.json.trade_state === 'SUCCESS') {
-        res.json({ ok: true, outTradeNo: baseTradeNo, alreadyPaid: true });
+    const order = await createBaseWechatOrder(orderId, amountYuan, description);
+    if (order.alreadyPaid) {
+      res.json({ ok: true, outTradeNo: order.outTradeNo, alreadyPaid: true, payParams: null, h5Url: null });
+      return;
+    }
+    const { body, outTradeNo } = order;
+
+    // JSAPI（微信内，需要 openId）
+    if (openId) {
+      const created = await wechatRequest(
+        'POST',
+        '/v3/pay/transactions/jsapi',
+        { ...body, payer: { openid: openId } }
+      );
+      if (created.status !== 200 || !created.json?.prepay_id) {
+        const msg = created.json?.message || created.json?.code || created.text;
+        res.status(502).json({ error: `微信下单失败：${msg}`, detail: created.json ?? created.text });
         return;
       }
-      if (['CLOSED', 'REVOKED', 'PAYERROR'].includes(query.json.trade_state)) {
-        baseTradeNo = outTradeNoOf(orderId, `R${Date.now().toString().slice(-6)}`);
-      }
-    }
-
-    const body = {
-      appid: APP_ID,
-      mchid: MCH_ID,
-      description: String(description || '天启无书课程报名').slice(0, 127),
-      out_trade_no: baseTradeNo,
-      time_expire: new Date(Date.now() + 30 * 60 * 1000).toISOString().replace(/\.\d{3}Z$/, '+08:00'),
-      attach: String(orderId),
-      notify_url: NOTIFY_URL,
-      support_fapiao: false,
-      amount: { total, currency: 'CNY' },
-      payer: { openid: openId },
-    };
-
-    const created = await wechatRequest('POST', '/v3/pay/transactions/jsapi', body);
-    if (created.status !== 200 || !created.json?.prepay_id) {
-      const msg = created.json?.message || created.json?.code || created.text;
-      res.status(502).json({ error: `微信下单失败：${msg}`, detail: created.json ?? created.text });
+      const timeStamp = String(Math.floor(Date.now() / 1000));
+      const nonceStr = randomNonce();
+      const pkg = `prepay_id=${created.json.prepay_id}`;
+      const paySign = rsaSha256Sign(`${APP_ID}\n${timeStamp}\n${nonceStr}\n${pkg}\n`);
+      res.json({
+        ok: true,
+        outTradeNo,
+        alreadyPaid: false,
+        payParams: {
+          appId: APP_ID,
+          timeStamp,
+          nonceStr,
+          package: pkg,
+          signType: 'RSA',
+          paySign,
+        },
+        h5Url: null,
+      });
       return;
     }
 
-    const timeStamp = String(Math.floor(Date.now() / 1000));
-    const nonceStr = randomNonce();
-    const pkg = `prepay_id=${created.json.prepay_id}`;
-    const paySign = rsaSha256Sign(`${APP_ID}\n${timeStamp}\n${nonceStr}\n${pkg}\n`);
-
+    // H5 支付（兜底：无 openId 时跳转到微信 APP 完成支付）
+    const h5Body = {
+      ...body,
+      scene_info: {
+        payer_client_ip: clientIpFromRequest(req),
+        h5_info: {
+          type: 'Wap',
+          app_url: clientUrl || 'https://tianqiwushu.cn',
+          app_name: '天启无书',
+        },
+      },
+    };
+    const created = await wechatRequest('POST', '/v3/pay/transactions/h5', h5Body);
+    if (created.status !== 200 || !created.json?.h5_url) {
+      const msg = created.json?.message || created.json?.code || created.text;
+      res.status(502).json({ error: `微信 H5 下单失败：${msg}`, detail: created.json ?? created.text });
+      return;
+    }
     res.json({
       ok: true,
-      outTradeNo: baseTradeNo,
-      payParams: {
-        appId: APP_ID,
-        timeStamp,
-        nonceStr,
-        package: pkg,
-        signType: 'RSA',
-        paySign,
-      },
+      outTradeNo,
+      alreadyPaid: false,
+      payParams: null,
+      h5Url: created.json.h5_url,
     });
   } catch (e) {
     console.error('[pay-service] /api/pay/jsapi 异常：', e);

@@ -18,7 +18,10 @@ export type SelfPayResult =
       outTradeNo: string;
       /** 该订单此前已支付成功（重复进入支付时的短路返回） */
       alreadyPaid: boolean;
+      /** 微信内 JSAPI 参数；h5Url 为空时用它 */
       payParams: SelfPayJsapiParams | null;
+      /** H5 支付跳转地址；存在时优先跳转到微信 APP 支付 */
+      h5Url: string | null;
     }
   | { ok: false; error: string };
 
@@ -37,7 +40,9 @@ export type SelfPayJsapiParams = {
  * 构建期读不到 VITE_PAY_SERVICE_URL，因此这里兜底写死；如需临时停用，
  * 把下面常量改为空字符串即可（或在 Zeabur 配 VITE_PAY_SERVICE_URL 覆盖）。
  */
-const DEFAULT_PAY_SERVICE_URL = 'https://pay.tianqiwushu.cn';
+// 默认留空，暂时走 Zion 内置支付；
+// 等 Zion 里 account.oauth2_user_info_map 读权限开好后，再改成 https://pay.tianqiwushu.cn
+const DEFAULT_PAY_SERVICE_URL = '';
 
 function serviceBaseUrl(): string {
   const raw = String(import.meta.env.VITE_PAY_SERVICE_URL ?? '').trim().replace(/\/+$/, '');
@@ -73,7 +78,10 @@ export async function createSelfPayOrder(input: {
   orderId: string;
   amountYuan: number;
   description: string;
-  openId: string;
+  /** 微信内 JSAPI 需要 openId；为空时服务自动降级为 H5 支付 */
+  openId?: string | null;
+  /** 当前页面 URL，用于 H5 支付的 app_url */
+  clientUrl?: string;
 }): Promise<SelfPayResult> {
   const base = serviceBaseUrl();
   if (!base) return { ok: false, error: '未配置自建支付服务地址' };
@@ -81,7 +89,10 @@ export async function createSelfPayOrder(input: {
     const res = await fetch(`${base}/api/pay/jsapi`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(input),
+      body: JSON.stringify({
+        ...input,
+        openId: input.openId ?? undefined,
+      }),
     });
     const json = (await res.json()) as {
       ok?: boolean;
@@ -89,21 +100,38 @@ export async function createSelfPayOrder(input: {
       outTradeNo?: string;
       alreadyPaid?: boolean;
       payParams?: SelfPayJsapiParams;
+      h5Url?: string | null;
     };
     if (!res.ok || !json.ok) {
       return { ok: false, error: json.error ?? `下单失败（HTTP ${res.status}）` };
     }
     if (json.alreadyPaid) {
-      return { ok: true, outTradeNo: json.outTradeNo ?? '', alreadyPaid: true, payParams: null };
+      return {
+        ok: true,
+        outTradeNo: json.outTradeNo ?? '',
+        alreadyPaid: true,
+        payParams: null,
+        h5Url: null,
+      };
+    }
+    if (json.h5Url) {
+      return {
+        ok: true,
+        outTradeNo: json.outTradeNo ?? '',
+        alreadyPaid: false,
+        payParams: null,
+        h5Url: json.h5Url,
+      };
     }
     if (!json.payParams?.package) {
-      return { ok: false, error: '支付服务未返回 prepay_id' };
+      return { ok: false, error: '支付服务未返回支付参数' };
     }
     return {
       ok: true,
       outTradeNo: json.outTradeNo ?? '',
       alreadyPaid: false,
       payParams: json.payParams,
+      h5Url: null,
     };
   } catch (e) {
     return { ok: false, error: (e as Error)?.message ?? String(e) };
