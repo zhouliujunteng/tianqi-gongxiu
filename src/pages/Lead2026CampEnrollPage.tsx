@@ -73,6 +73,11 @@ import type {
 } from '../types/camp2026';
 import { friendlyRequestErrorMessage } from '../utils/friendlyRequestError';
 import { extractWechatOpenId } from '../payment/selfPay';
+import {
+  fetchAdminSelfPaidOrders,
+  useAdminSelfPaidOrders,
+  type AdminSelfPaidRow,
+} from '../payment/useAdminSelfPaidOrders';
 import { useSelfPayPaid } from '../payment/useSelfPayPaid';
 import { isWeixinBrowser } from '../payment/weixinBrowser';
 import { uploadImageViaZion } from '../utils/zionImageUpload';
@@ -81,6 +86,32 @@ type Props = {
   wechatOAuthExchangePending?: boolean;
   wechatOAuthExchangeError?: string | null;
 };
+
+type CampAdminPaidRow = CampAdminPaidUsersData['fz_payment_record'][number];
+
+/** 自建通道已付订单没有 Zion 支付记录，按后台名单的行结构补齐缺省字段 */
+function toCampAdminPaidRow(row: AdminSelfPaidRow): CampAdminPaidRow {
+  return {
+    id: row.id,
+    account_id: null,
+    created_at: row.created_at,
+    order_id: row.id,
+    order: {
+      id: row.order.id,
+      ud_dingdanleixing_3fb8b8: WENJUAN_CAMP_ORDER_TYPE,
+      ud_dingdanbeizhu_439d3a: row.order.ud_dingdanbeizhu_439d3a,
+      ud_yonghuxinxi_yonghuku_55773d: row.order.ud_yonghuxinxi_yonghuku_55773d,
+      ud_gongzhonghaoid_665d9b: row.order.ud_gongzhonghaoid_665d9b,
+      ud_gongxiuyingweixin_62acc6: row.order.ud_gongxiuyingweixin_62acc6,
+      ud_tianjiazhuangtai_a1779b: row.order.ud_tianjiazhuangtai_a1779b,
+      ud_dingdanjine_a50087: row.order.ud_dingdanjine_a50087,
+      ud_dingdanjine0028zhengshu0029_1070ec:
+        row.order.ud_dingdanjine0028zhengshu0029_1070ec,
+      ud_gongxiuyingdaqiajilu_fd4f79_aggregate: null,
+      ud_gongxiuyingdaqiajilu_fd4f79: [],
+    },
+  };
+}
 
 function isZionPaymentSuccessful(status: string | null | undefined): boolean {
   return String(status ?? '').toUpperCase() === 'SUCCESSFUL';
@@ -474,12 +505,56 @@ export function Lead2026CampEnrollPage({
     notifyOnNetworkStatusChange: true,
   });
 
-  const campAdminPaidRows = useMemo(
-    () =>
-      (adminPaidUsersData?.fz_payment_record ?? []).filter(
-        (row) => row.order?.ud_dingdanleixing_3fb8b8 === WENJUAN_CAMP_ORDER_TYPE
-      ),
-    [adminPaidUsersData]
+  /**
+   * 自建支付通道（pay-service）收款不进 fz_payment_record，
+   * 这里把订单表里「已支付」的那一并合入后台名单，按订单 ID 去重。
+   */
+  const selfAdminPaid = useAdminSelfPaidOrders(
+    Boolean(token) && (isCampAdmin || isCampCheckinAdmin || isCampWechatAdmin),
+    WENJUAN_CAMP_ORDER_TYPE
+  );
+
+  const campAdminPaidRows = useMemo<CampAdminPaidRow[]>(() => {
+    const seen = new Set<string>();
+    const merged: CampAdminPaidRow[] = [];
+    (adminPaidUsersData?.fz_payment_record ?? []).forEach((row) => {
+      if (row.order?.ud_dingdanleixing_3fb8b8 !== WENJUAN_CAMP_ORDER_TYPE) return;
+      seen.add(String(row.order?.id ?? row.id));
+      merged.push(row);
+    });
+    selfAdminPaid.rows.forEach((row) => {
+      const key = String(row.order?.id ?? row.id);
+      if (seen.has(key)) return;
+      seen.add(key);
+      merged.push(toCampAdminPaidRow(row));
+    });
+    return merged;
+  }, [adminPaidUsersData, selfAdminPaid.rows]);
+
+  const adminListLoading = adminPaidUsersLoading || selfAdminPaid.loading;
+
+  /** 后台操作（标记进群 / 补填微信号）后回读订单最新值：自建通道订单不在 fz_payment_record 里 */
+  const refetchAdminRowContact = useCallback(
+    async (orderId: string) => {
+      selfAdminPaid.refresh();
+      const refetched = await refetchAdminPaidUsers();
+      const zionRow = (refetched.data?.fz_payment_record ?? []).find(
+        (r) => String(r.order?.id) === orderId
+      );
+      if (zionRow) {
+        return parseCampWechatContactFields(
+          zionRow.order?.ud_gongxiuyingweixin_62acc6,
+          zionRow.order?.ud_tianjiazhuangtai_a1779b
+        );
+      }
+      const selfRows = await fetchAdminSelfPaidOrders(WENJUAN_CAMP_ORDER_TYPE);
+      const selfRow = selfRows.find((r) => String(r.order?.id) === orderId);
+      return parseCampWechatContactFields(
+        selfRow?.order?.ud_gongxiuyingweixin_62acc6 ?? null,
+        selfRow?.order?.ud_tianjiazhuangtai_a1779b ?? null
+      );
+    },
+    [refetchAdminPaidUsers, selfAdminPaid.refresh]
   );
 
   const adminUserLibraryIds = useMemo(() => {
@@ -848,14 +923,7 @@ export function Lead2026CampEnrollPage({
         if (res.errors?.length) {
           throw new Error(res.errors.map((e) => e.message).join('；'));
         }
-        const refetched = await refetchAdminPaidUsers();
-        const updatedRow = (refetched.data?.fz_payment_record ?? []).find(
-          (r) => String(r.order?.id) === orderId
-        );
-        const updatedContact = parseCampWechatContactFields(
-          updatedRow?.order?.ud_gongxiuyingweixin_62acc6,
-          updatedRow?.order?.ud_tianjiazhuangtai_a1779b
-        );
+        const updatedContact = await refetchAdminRowContact(orderId);
         if (updatedContact?.friend_status !== nextStatus) {
           throw new Error(
             `后端没有确认更新进群状态：刷新后仍为「${
@@ -869,7 +937,7 @@ export function Lead2026CampEnrollPage({
         setWechatStatusUpdatingOrderId(null);
       }
     },
-    [campWechatAdminPaidRows, patchCampOrderWechatContact, refetchAdminPaidUsers]
+    [campWechatAdminPaidRows, patchCampOrderWechatContact, refetchAdminRowContact]
   );
 
   const saveOrderWechatFromAdmin = useCallback(
@@ -893,14 +961,7 @@ export function Lead2026CampEnrollPage({
         if (res.errors?.length) {
           throw new Error(res.errors.map((e) => e.message).join('；'));
         }
-        const refetched = await refetchAdminPaidUsers();
-        const updatedRow = (refetched.data?.fz_payment_record ?? []).find(
-          (r) => String(r.order?.id) === orderId
-        );
-        const updatedContact = parseCampWechatContactFields(
-          updatedRow?.order?.ud_gongxiuyingweixin_62acc6,
-          updatedRow?.order?.ud_tianjiazhuangtai_a1779b
-        );
+        const updatedContact = await refetchAdminRowContact(orderId);
         if (updatedContact?.weixin !== draft) {
           throw new Error(
             `后端没有确认写入微信号：刷新后读到「${
@@ -919,7 +980,7 @@ export function Lead2026CampEnrollPage({
         setWechatStatusUpdatingOrderId(null);
       }
     },
-    [patchCampOrderWechatContact, refetchAdminPaidUsers, wechatAdminDrafts]
+    [patchCampOrderWechatContact, refetchAdminRowContact, wechatAdminDrafts]
   );
 
   const submitCheckin = useCallback(async () => {
@@ -1101,7 +1162,10 @@ export function Lead2026CampEnrollPage({
             <button
               type="button"
               className="min-h-12 rounded-full border border-border px-6 py-3 text-sm text-muted-foreground transition hover:bg-muted/50"
-              onClick={() => void refetchAdminPaidUsers()}
+              onClick={() => {
+                void refetchAdminPaidUsers();
+                selfAdminPaid.refresh();
+              }}
             >
               刷新列表
             </button>
@@ -1112,7 +1176,7 @@ export function Lead2026CampEnrollPage({
         </section>
 
         <section className="rounded-[2rem] border border-border bg-card p-4 shadow-organic-sm md:p-6">
-          {adminPaidUsersLoading ? (
+          {adminListLoading ? (
             <p className="py-8 text-center text-sm text-muted-foreground">正在加载已支付用户列表…</p>
           ) : null}
 
@@ -1122,13 +1186,13 @@ export function Lead2026CampEnrollPage({
             </p>
           ) : null}
 
-          {!adminPaidUsersLoading && !adminPaidUsersError && filteredAdminPaidUsers.length === 0 ? (
+          {!adminListLoading && !adminPaidUsersError && filteredAdminPaidUsers.length === 0 ? (
             <p className="py-8 text-center text-sm text-muted-foreground">
               暂无符合条件的已支付用户记录。
             </p>
           ) : null}
 
-          {!adminPaidUsersLoading && !adminPaidUsersError && filteredAdminPaidUsers.length > 0 ? (
+          {!adminListLoading && !adminPaidUsersError && filteredAdminPaidUsers.length > 0 ? (
             <div className="overflow-x-auto">
               <table className="min-w-full border-separate border-spacing-y-2 text-left text-sm">
                 <thead>
@@ -1210,7 +1274,10 @@ export function Lead2026CampEnrollPage({
             <button
               type="button"
               className="min-h-12 rounded-full border border-border px-6 py-3 text-sm text-muted-foreground transition hover:bg-muted/50"
-              onClick={() => void refetchAdminPaidUsers()}
+              onClick={() => {
+                void refetchAdminPaidUsers();
+                selfAdminPaid.refresh();
+              }}
             >
               刷新列表
             </button>
@@ -1222,7 +1289,7 @@ export function Lead2026CampEnrollPage({
         </section>
 
         <section className="rounded-[2rem] border border-border bg-card p-4 shadow-organic-sm md:p-6">
-          {adminPaidUsersLoading ? (
+          {adminListLoading ? (
             <p className="py-8 text-center text-sm text-muted-foreground">正在加载…</p>
           ) : null}
 
@@ -1232,13 +1299,13 @@ export function Lead2026CampEnrollPage({
             </p>
           ) : null}
 
-          {!adminPaidUsersLoading && !adminPaidUsersError && filteredWechatAdminRows.length === 0 ? (
+          {!adminListLoading && !adminPaidUsersError && filteredWechatAdminRows.length === 0 ? (
             <p className="py-8 text-center text-sm text-muted-foreground">
               暂无{campPhaseLabel}报名记录。
             </p>
           ) : null}
 
-          {!adminPaidUsersLoading && !adminPaidUsersError && filteredWechatAdminRows.length > 0 ? (
+          {!adminListLoading && !adminPaidUsersError && filteredWechatAdminRows.length > 0 ? (
             <div className="overflow-x-auto">
               <table className="min-w-full border-separate border-spacing-y-2 text-left text-sm">
                 <thead>
@@ -1389,7 +1456,10 @@ export function Lead2026CampEnrollPage({
             <button
               type="button"
               className="min-h-12 rounded-full border border-border px-6 py-3 text-sm text-muted-foreground transition hover:bg-muted/50"
-              onClick={() => void refetchAdminPaidUsers()}
+              onClick={() => {
+                void refetchAdminPaidUsers();
+                selfAdminPaid.refresh();
+              }}
             >
               刷新列表
             </button>
@@ -1409,7 +1479,7 @@ export function Lead2026CampEnrollPage({
         </section>
 
         <section className="rounded-[2rem] border border-border bg-card p-4 shadow-organic-sm md:p-6">
-          {adminPaidUsersLoading ? (
+          {adminListLoading ? (
             <p className="py-8 text-center text-sm text-muted-foreground">正在加载打卡情况…</p>
           ) : null}
 
@@ -1419,13 +1489,13 @@ export function Lead2026CampEnrollPage({
             </p>
           ) : null}
 
-          {!adminPaidUsersLoading && !adminPaidUsersError && filteredCheckinAdminRows.length === 0 ? (
+          {!adminListLoading && !adminPaidUsersError && filteredCheckinAdminRows.length === 0 ? (
             <p className="py-8 text-center text-sm text-muted-foreground">
               暂无符合条件的打卡记录。
             </p>
           ) : null}
 
-          {!adminPaidUsersLoading && !adminPaidUsersError && filteredCheckinAdminRows.length > 0 ? (
+          {!adminListLoading && !adminPaidUsersError && filteredCheckinAdminRows.length > 0 ? (
             <div className="overflow-x-auto">
               <table className="min-w-full border-separate border-spacing-y-2 text-left text-sm">
                 <thead>

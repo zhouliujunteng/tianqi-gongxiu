@@ -58,6 +58,11 @@ import type {
   WenjuanPayEligibilityData,
 } from '../types/lead2026';
 import { extractWechatOpenId } from '../payment/selfPay';
+import {
+  fetchAdminSelfPaidOrders,
+  useAdminSelfPaidOrders,
+  type AdminSelfPaidRow,
+} from '../payment/useAdminSelfPaidOrders';
 import { useSelfPayPaid } from '../payment/useSelfPayPaid';
 import { isWeixinBrowser } from '../payment/weixinBrowser';
 import { friendlyRequestErrorMessage } from '../utils/friendlyRequestError';
@@ -590,7 +595,7 @@ export function Lead2026AdvancedCampEnrollPage({
     notifyOnNetworkStatusChange: true,
   });
 
-  const advancedCampWechatAdminPaidRows = useMemo(() => {
+  const zionAdminPaidRows = useMemo(() => {
     return (adminPaidUsersData?.fz_payment_record ?? []).filter((row) => {
       if (row.order?.ud_dingdanleixing_3fb8b8 !== WENJUAN_ADVANCED_CAMP_ORDER_TYPE) {
         return false;
@@ -598,6 +603,67 @@ export function Lead2026AdvancedCampEnrollPage({
       return isDescriptionMatch(row.order?.ud_dingdanbeizhu_439d3a, payDescriptionAliases);
     });
   }, [adminPaidUsersData, payDescriptionAliases]);
+
+  /**
+   * 自建支付通道（pay-service）收款不进 fz_payment_record，
+   * 这里把订单表里「已支付」的那一并合入后台名单，按订单 ID 去重。
+   */
+  const selfAdminPaid = useAdminSelfPaidOrders(
+    isAdvancedCampWechatAdmin,
+    WENJUAN_ADVANCED_CAMP_ORDER_TYPE
+  );
+
+  const advancedCampWechatAdminPaidRows = useMemo<
+    Array<CampAdminPaidUsersData['fz_payment_record'][number] | AdminSelfPaidRow>
+  >(() => {
+    const seen = new Set<string>();
+    const merged: Array<
+      CampAdminPaidUsersData['fz_payment_record'][number] | AdminSelfPaidRow
+    > = [];
+    zionAdminPaidRows.forEach((row) => {
+      const key = String(row.order?.id ?? row.id);
+      seen.add(key);
+      merged.push(row);
+    });
+    selfAdminPaid.rows.forEach((row) => {
+      if (!isDescriptionMatch(row.order?.ud_dingdanbeizhu_439d3a, payDescriptionAliases)) {
+        return;
+      }
+      const key = String(row.order?.id ?? row.id);
+      if (seen.has(key)) return;
+      seen.add(key);
+      merged.push(row);
+    });
+    return merged;
+  }, [zionAdminPaidRows, selfAdminPaid.rows, payDescriptionAliases]);
+
+  const adminListLoading = adminPaidUsersLoading || selfAdminPaid.loading;
+
+  /** 后台操作（标记进群 / 补填微信号）后回读订单最新值：自建通道订单不在 fz_payment_record 里 */
+  const refetchAdminRowContact = useCallback(
+    async (orderId: string) => {
+      selfAdminPaid.refresh();
+      const refetched = await refetchAdminPaidUsers();
+      const zionRow = (refetched.data?.fz_payment_record ?? []).find(
+        (r) => String(r.order?.id) === orderId
+      );
+      if (zionRow) {
+        return parseCampWechatContactFields(
+          zionRow.order?.ud_gongxiuyingweixin_62acc6,
+          zionRow.order?.ud_tianjiazhuangtai_a1779b
+        );
+      }
+      const selfRows = await fetchAdminSelfPaidOrders(
+        WENJUAN_ADVANCED_CAMP_ORDER_TYPE
+      );
+      const selfRow = selfRows.find((r) => String(r.order?.id) === orderId);
+      return parseCampWechatContactFields(
+        selfRow?.order?.ud_gongxiuyingweixin_62acc6 ?? null,
+        selfRow?.order?.ud_tianjiazhuangtai_a1779b ?? null
+      );
+    },
+    [refetchAdminPaidUsers, selfAdminPaid.refresh]
+  );
 
   const adminUserLibraryIds = useMemo(() => {
     const ids = new Set<string>();
@@ -862,14 +928,7 @@ export function Lead2026AdvancedCampEnrollPage({
         if (res.errors?.length) {
           throw new Error(res.errors.map((e) => e.message).join('；'));
         }
-        const refetched = await refetchAdminPaidUsers();
-        const updatedRow = (refetched.data?.fz_payment_record ?? []).find(
-          (r) => String(r.order?.id) === orderId
-        );
-        const updatedContact = parseCampWechatContactFields(
-          updatedRow?.order?.ud_gongxiuyingweixin_62acc6,
-          updatedRow?.order?.ud_tianjiazhuangtai_a1779b
-        );
+        const updatedContact = await refetchAdminRowContact(orderId);
         if (updatedContact?.friend_status !== nextStatus) {
           throw new Error(
             `后端没有确认更新进群状态：刷新后仍为「${
@@ -886,7 +945,7 @@ export function Lead2026AdvancedCampEnrollPage({
     [
       advancedCampWechatAdminPaidRows,
       patchCampOrderWechatContact,
-      refetchAdminPaidUsers,
+      refetchAdminRowContact,
     ]
   );
 
@@ -911,14 +970,7 @@ export function Lead2026AdvancedCampEnrollPage({
         if (res.errors?.length) {
           throw new Error(res.errors.map((e) => e.message).join('；'));
         }
-        const refetched = await refetchAdminPaidUsers();
-        const updatedRow = (refetched.data?.fz_payment_record ?? []).find(
-          (r) => String(r.order?.id) === orderId
-        );
-        const updatedContact = parseCampWechatContactFields(
-          updatedRow?.order?.ud_gongxiuyingweixin_62acc6,
-          updatedRow?.order?.ud_tianjiazhuangtai_a1779b
-        );
+        const updatedContact = await refetchAdminRowContact(orderId);
         if (updatedContact?.weixin !== draft) {
           throw new Error(
             `后端没有确认写入微信号：刷新后读到「${
@@ -937,7 +989,7 @@ export function Lead2026AdvancedCampEnrollPage({
         setWechatStatusUpdatingOrderId(null);
       }
     },
-    [patchCampOrderWechatContact, refetchAdminPaidUsers, wechatAdminDrafts]
+    [patchCampOrderWechatContact, refetchAdminRowContact, wechatAdminDrafts]
   );
 
   const { data: serviceQrData } = useQuery<CampServiceQrQueryData>(GET_CAMP_SERVICE_QR, {
@@ -1038,7 +1090,10 @@ export function Lead2026AdvancedCampEnrollPage({
             <button
               type="button"
               className="min-h-12 rounded-full border border-border px-6 py-3 text-sm text-muted-foreground transition hover:bg-muted/50"
-              onClick={() => void refetchAdminPaidUsers()}
+              onClick={() => {
+                void refetchAdminPaidUsers();
+                selfAdminPaid.refresh();
+              }}
             >
               刷新列表
             </button>
@@ -1050,7 +1105,7 @@ export function Lead2026AdvancedCampEnrollPage({
         </section>
 
         <section className="rounded-[2rem] border border-border bg-card p-4 shadow-organic-sm md:p-6">
-          {adminPaidUsersLoading ? (
+          {adminListLoading ? (
             <p className="py-8 text-center text-sm text-muted-foreground">正在加载…</p>
           ) : null}
 
@@ -1060,13 +1115,13 @@ export function Lead2026AdvancedCampEnrollPage({
             </p>
           ) : null}
 
-          {!adminPaidUsersLoading && !adminPaidUsersError && filteredWechatAdminRows.length === 0 ? (
+          {!adminListLoading && !adminPaidUsersError && filteredWechatAdminRows.length === 0 ? (
             <p className="py-8 text-center text-sm text-muted-foreground">
               暂无{phaseLabel}报名缴费记录。
             </p>
           ) : null}
 
-          {!adminPaidUsersLoading && !adminPaidUsersError && filteredWechatAdminRows.length > 0 ? (
+          {!adminListLoading && !adminPaidUsersError && filteredWechatAdminRows.length > 0 ? (
             <div className="overflow-x-auto">
               <table className="min-w-full border-separate border-spacing-y-2 text-left text-sm">
                 <thead>
@@ -1104,7 +1159,7 @@ export function Lead2026AdvancedCampEnrollPage({
                     const toggleLabel = isAdded ? '撤销添加' : '标记为已添加';
                     return (
                       <tr
-                        key={String(row.id)}
+                        key={String(row.order?.id ?? row.id)}
                         className="rounded-2xl border border-border/70 bg-background/60 text-foreground"
                       >
                         <td className="px-3 py-3 font-mono whitespace-nowrap">{miniId}</td>
