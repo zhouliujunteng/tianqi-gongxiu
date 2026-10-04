@@ -6,6 +6,7 @@
   "description": "天启无书 · 自建微信支付服务（绕开 Zion 内置支付，指定商户号收款）",
   "main": "index.js",
   "scripts": {
+    "build": "node --check index.js",
     "start": "node index.js",
     "dev": "node --watch index.js"
   },
