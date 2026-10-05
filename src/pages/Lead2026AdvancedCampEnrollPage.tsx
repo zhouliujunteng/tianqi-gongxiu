@@ -854,6 +854,11 @@ export function Lead2026AdvancedCampEnrollPage({
     if (selfPayPaid) setPayUnlocked(true);
   }, [selfPayPaid]);
 
+  const paymentBypassed = useMemo(
+    () => isAdvancedCampPaymentBypassed(loginAccountId),
+    [loginAccountId]
+  );
+
   useEffect(() => {
     if (!token || paidViaZion) return;
     let pending = false;
@@ -1250,11 +1255,6 @@ export function Lead2026AdvancedCampEnrollPage({
       </div>
     );
   }
-
-  const paymentBypassed = useMemo(
-    () => isAdvancedCampPaymentBypassed(loginAccountId),
-    [loginAccountId]
-  );
 
   const paid =
     paidViaZion || selfPayPaid || payUnlocked || previousPhasePaidById || paymentBypassed;
