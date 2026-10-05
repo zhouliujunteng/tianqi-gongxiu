@@ -111,8 +111,11 @@ const ADVANCED_CAMP_WECHAT_ADMIN_ACCOUNT_IDS = new Set([
   '10000000000009519',
 ]);
 
-/** 二阶共修营报名缴费白名单：命中后直接视为已支付，无需缴费 */
-const ADVANCED_CAMP_PAYMENT_BYPASS_ACCOUNT_IDS = new Set(['10000000000009397']);
+/** 二阶共修营报名缴费白名单：命中后直接视为已支付、且不受报名截止时间限制 */
+const ADVANCED_CAMP_PAYMENT_BYPASS_ACCOUNT_IDS = new Set([
+  '1000000000009397',
+  '10000000000009397',
+]);
 
 function isAdvancedCampPaymentBypassed(
   accountId: string | null | undefined
@@ -581,7 +584,10 @@ export function Lead2026AdvancedCampEnrollPage({
     isAdvancedCampWechatAdminAccount(loginAccountId);
   const canEnrollAfterDeadline =
     canBypassAdvancedCampEnrollmentDeadline(loginAccountId);
-  const enrollmentClosed = timeEnrollmentClosed && !canEnrollAfterDeadline;
+  const enrollmentClosed =
+    timeEnrollmentClosed &&
+    !canEnrollAfterDeadline &&
+    !isAdvancedCampPaymentBypassed(loginAccountId);
   const payAccountId = useMemo(() => {
     if (jwtAccountId && /^\d+$/.test(jwtAccountId)) return jwtAccountId;
     const id = meRow?.id?.trim();
