@@ -111,6 +111,17 @@ const ADVANCED_CAMP_WECHAT_ADMIN_ACCOUNT_IDS = new Set([
   '10000000000009519',
 ]);
 
+/** 二阶共修营报名缴费白名单：命中后直接视为已支付，无需缴费 */
+const ADVANCED_CAMP_PAYMENT_BYPASS_ACCOUNT_IDS = new Set(['10000000000009397']);
+
+function isAdvancedCampPaymentBypassed(
+  accountId: string | null | undefined
+): boolean {
+  return ADVANCED_CAMP_PAYMENT_BYPASS_ACCOUNT_IDS.has(
+    String(accountId ?? '').trim()
+  );
+}
+
 function isZionPaymentSuccessful(status: string | null | undefined): boolean {
   return String(status ?? '').toUpperCase() === 'SUCCESSFUL';
 }
@@ -1240,8 +1251,13 @@ export function Lead2026AdvancedCampEnrollPage({
     );
   }
 
+  const paymentBypassed = useMemo(
+    () => isAdvancedCampPaymentBypassed(loginAccountId),
+    [loginAccountId]
+  );
+
   const paid =
-    paidViaZion || selfPayPaid || payUnlocked || previousPhasePaidById;
+    paidViaZion || selfPayPaid || payUnlocked || previousPhasePaidById || paymentBypassed;
   const showWechatPayCard = isWenjuanWechatPayEnabled();
   const showPayCompleteFallback =
     !showWechatPayCard && isWenjuanPayManualClientConfirmAllowed();
@@ -1296,7 +1312,9 @@ export function Lead2026AdvancedCampEnrollPage({
               已完成二阶共修营报名
             </h2>
             <p className="mx-auto mt-3 max-w-xl text-sm leading-relaxed text-muted-foreground">
-              {previousPhasePaidById
+              {paymentBypassed
+                ? '该账号已被设置为无需缴费，可直接报名。请联系进群小助手，受邀进入专属学习社群。'
+                : previousPhasePaidById
                 ? '系统已识别到该用户 ID 曾成功报名二阶共修营并完成缴费，本期可免费报名。请联系进群小助手，受邀进入专属学习社群。'
                 : '系统已识别到本期报名付款成功。请联系进群小助手，受邀进入专属学习社群。'}
             </p>
@@ -1391,7 +1409,11 @@ export function Lead2026AdvancedCampEnrollPage({
                 <p className="mt-1">
                   本次应付金额：
                   <span className="font-semibold text-primary">
-                    {previousPhasePaidById ? '免缴费（往期已成功报名缴费）' : `¥${amountYuan}`}
+                    {paymentBypassed
+                      ? '无需缴费'
+                      : previousPhasePaidById
+                      ? '免缴费（往期已成功报名缴费）'
+                      : `¥${amountYuan}`}
                   </span>
                 </p>
                 {checkingPreviousPhaseEligibility ? (
