@@ -108,6 +108,8 @@ export function CampIntroShowcase({ campPhase, campPhaseLabel, schedule }: Props
   const isNonRefundableParticipationFee = isCampParticipationFeeNonRefundable(campPhase);
   const participationFeeYuan = getCampParticipationFeeYuan(campPhase);
   const campDurationDays = getCampDurationDays(campPhase);
+  /** 按当期营期天数截取主干安排（07期为 7 天） */
+  const curriculumDays = CURRICULUM.slice(0, campDurationDays);
 
   return (
     <div className="relative mb-6 space-y-6 overflow-hidden md:space-y-7">
@@ -263,7 +265,7 @@ export function CampIntroShowcase({ campPhase, campPhaseLabel, schedule }: Props
           模块 3
         </p>
         <h3 className="mt-2 font-display text-2xl text-foreground md:text-3xl">
-          14 天系统课程 · 每天溯源问题核心
+          {campDurationDays} 天系统课程 · 每天溯源问题核心
         </h3>
         <p className="mt-2 text-sm leading-snug text-muted-foreground">
           以下为营期主干安排，具体以当期群内通知为准。
@@ -280,7 +282,7 @@ export function CampIntroShowcase({ campPhase, campPhaseLabel, schedule }: Props
                 </tr>
               </thead>
               <tbody>
-                {CURRICULUM.map((row, i) => (
+                {curriculumDays.map((row, i) => (
                   <tr
                     key={row.day}
                     className={i % 2 === 0 ? 'bg-background/80' : 'bg-muted/30'}
@@ -298,7 +300,7 @@ export function CampIntroShowcase({ campPhase, campPhaseLabel, schedule }: Props
         </div>
 
         <div className="mt-4 space-y-2 md:hidden">
-          {CURRICULUM.map((row) => (
+          {curriculumDays.map((row) => (
             <div
               key={row.day}
               className="rounded-xl border border-border/60 bg-background/60 px-3 py-2.5"
@@ -461,7 +463,7 @@ export function CampIntroShowcase({ campPhase, campPhaseLabel, schedule }: Props
           教育的本质是唤醒，不是塑造。
         </p>
         <p className="mx-auto mt-3 max-w-2xl text-sm leading-snug text-muted-foreground md:text-base md:leading-relaxed">
-          14 天，给自己一次改变的机会，给孩子一个重生的可能。望每一位学员：一次学习，终身受益。
+          {campDurationDays} 天，给自己一次改变的机会，给孩子一个重生的可能。望每一位学员：一次学习，终身受益。
         </p>
         <p className="mt-4 font-display text-sm font-semibold text-secondary md:text-base">
           立即报名｜缴费后由进群小助手邀请进群
