@@ -1,5 +1,10 @@
 import type { CSSProperties, ReactNode } from 'react';
-import { isCampParticipationFeeNonRefundable, type CampPhase } from '../constants/camp2026';
+import {
+  getCampDurationDays,
+  getCampParticipationFeeYuan,
+  isCampParticipationFeeNonRefundable,
+  type CampPhase,
+} from '../constants/camp2026';
 
 type CampSchedule = {
   dateRange: string;
@@ -101,6 +106,8 @@ function SectionShell({
 
 export function CampIntroShowcase({ campPhase, campPhaseLabel, schedule }: Props) {
   const isNonRefundableParticipationFee = isCampParticipationFeeNonRefundable(campPhase);
+  const participationFeeYuan = getCampParticipationFeeYuan(campPhase);
+  const campDurationDays = getCampDurationDays(campPhase);
 
   return (
     <div className="relative mb-6 space-y-6 overflow-hidden md:space-y-7">
@@ -124,13 +131,13 @@ export function CampIntroShowcase({ campPhase, campPhaseLabel, schedule }: Props
         <div className="max-w-3xl">
           <div>
             <p className="font-display text-xs font-semibold uppercase tracking-[0.28em] text-secondary">
-              14 天深度伴学 · {campPhaseLabel}
+              {campDurationDays} 天深度伴学 · {campPhaseLabel}
             </p>
             <h2 className="mt-3 font-display text-3xl font-bold leading-tight text-foreground md:text-4xl md:leading-tight">
               父母学对一次，孩子蜕变一生
             </h2>
             <p className="mt-3 font-display text-xl text-primary md:text-2xl">
-              14 天线上共修营｜从根源解决成长难题
+              {campDurationDays} 天线上共修营｜从根源解决成长难题
             </p>
             <p className="mt-4 text-sm leading-relaxed text-muted-foreground md:text-base">
               天启无书 · 纠偏培优体系｜26 年教育沉淀 · 数千家庭验证 · 一站式心智构建
@@ -372,7 +379,9 @@ export function CampIntroShowcase({ campPhase, campPhaseLabel, schedule }: Props
           <p className="mt-3 text-sm leading-relaxed text-foreground/90">
             已建档家长：免学费，仅需缴纳{' '}
             <span className="font-semibold text-secondary">
-              {isNonRefundableParticipationFee ? '200 元参与费用' : '200 元押金'}
+              {isNonRefundableParticipationFee
+                ? `${participationFeeYuan} 元参与费用`
+                : `${participationFeeYuan} 元押金`}
             </span>
             {isNonRefundableParticipationFee
               ? '（缴费后不退，请确认后报名）。'
@@ -381,7 +390,7 @@ export function CampIntroShowcase({ campPhase, campPhaseLabel, schedule }: Props
           {isNonRefundableParticipationFee ? (
             <div className="mt-4 rounded-2xl border border-destructive/30 bg-destructive/5 p-3 text-sm leading-snug text-foreground/90">
               <span className="font-semibold text-destructive">重要说明：</span>
-              已建档家长缴纳的 200 元为本期课程参与费用，不属于押金，缴费后不予退还。
+              已建档家长缴纳的 {participationFeeYuan} 元为本期课程参与费用，不属于押金，缴费后不予退还。
             </div>
           ) : null}
           <div className="mt-4 rounded-2xl border border-primary/25 bg-primary/5 p-3 text-sm leading-snug text-muted-foreground">
@@ -409,7 +418,7 @@ export function CampIntroShowcase({ campPhase, campPhaseLabel, schedule }: Props
             </li>
             <li>未建档家长缺席超过 3 次，不能建档。</li>
             {isNonRefundableParticipationFee ? (
-              <li>建档家长缴纳的 200 元为课程参与费用，缴费后不予退还。</li>
+              <li>建档家长缴纳的 {participationFeeYuan} 元为课程参与费用，缴费后不予退还。</li>
             ) : (
               <li>建档家长缺席超过 3 次，押金不予退还。</li>
             )}

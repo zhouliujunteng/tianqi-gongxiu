@@ -24,6 +24,7 @@ import {
   getCampDisplayName,
   getCampPayDescription,
   getCampPayDescriptionAliases,
+  getCampParticipationFeeYuan,
   getCampPhaseFromLocation,
   getCampEnrollmentDeadlineAtMs,
   getCampSchedule,
@@ -118,10 +119,13 @@ function isZionPaymentSuccessful(status: string | null | undefined): boolean {
   return String(status ?? '').toUpperCase() === 'SUCCESSFUL';
 }
 
-function getCampAmountByIdentity(identity: string | null | undefined): number {
+function getCampAmountByIdentity(
+  identity: string | null | undefined,
+  phase: CampPhase
+): number {
   const v = String(identity ?? '').trim();
   const eligible = new Set(['学员', '服务专员', '服务中心', '公众号学员名单']);
-  return eligible.has(v) ? 200 : 980;
+  return eligible.has(v) ? getCampParticipationFeeYuan(phase) : 980;
 }
 
 const CAMP_SERVICE_QR_DOC_TYPE = '共修营客服';
@@ -816,8 +820,11 @@ export function Lead2026CampEnrollPage({
     if (selfPayPaid) setCampPayUnlocked(true);
   }, [selfPayPaid]);
   const amountYuan = useMemo(
-    () => (publicStudentFound ? 200 : getCampAmountByIdentity(pricingIdentity)),
-    [pricingIdentity, publicStudentFound]
+    () =>
+      publicStudentFound
+        ? getCampParticipationFeeYuan(campPhase)
+        : getCampAmountByIdentity(pricingIdentity, campPhase),
+    [campPhase, pricingIdentity, publicStudentFound]
   );
   const displayCampContext = useMemo(() => {
     if (matchedForCampPricing) {
@@ -1679,7 +1686,9 @@ export function Lead2026CampEnrollPage({
             <p className="mt-2">
               每日设 2 个学习时段，灵活参与；两个时间段任选一场完成当日学习即可。未建档家长缺席超过 3 次不能建档。
               {isCampParticipationFeeNonRefundable(campPhase)
-                ? '建档家长缴纳的 200 元为课程参与费用，缴费后不予退还。'
+                ? `建档家长缴纳的 ${getCampParticipationFeeYuan(
+                    campPhase
+                  )} 元为课程参与费用，缴费后不予退还。`
                 : '建档家长缺席超过 3 次押金不予退还。'}
               课程开始 15 分钟后会议室自动关闭。每日会议时间：早晨 6:00—8:00、晚间 20:00—22:00。
             </p>

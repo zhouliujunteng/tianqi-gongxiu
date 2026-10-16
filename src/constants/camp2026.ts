@@ -101,6 +101,43 @@ export function isCampParticipationFeeNonRefundable(phase: CampPhase): boolean {
   return phase === '6' || phase === '8' || phase === '10';
 }
 
+/**
+ * 各期「已建档家长」参与费用（元）。
+ * 07期（内部 phase '10'）起由 200 元调整为 100 元（营期缩短为 7 天）。
+ */
+const CAMP_PARTICIPATION_FEE_YUAN: Record<CampPhase, number> = {
+  '1': 200,
+  '2': 200,
+  '3': 200,
+  '4': 200,
+  '5': 200,
+  '6': 200,
+  '8': 200,
+  '10': 100,
+};
+
+export function getCampParticipationFeeYuan(phase: CampPhase): number {
+  return CAMP_PARTICIPATION_FEE_YUAN[phase] ?? 200;
+}
+
+/**
+ * 各期营期天数。07期（内部 phase '10'）起由 14 天调整为 7 天。
+ */
+const CAMP_DURATION_DAYS: Record<CampPhase, number> = {
+  '1': 14,
+  '2': 14,
+  '3': 14,
+  '4': 14,
+  '5': 14,
+  '6': 14,
+  '8': 14,
+  '10': 7,
+};
+
+export function getCampDurationDays(phase: CampPhase): number {
+  return CAMP_DURATION_DAYS[phase] ?? 14;
+}
+
 /** 对外完整课程名（与群内通知一致），如「《父母学习·孩子蜕变》共修营第7期」 */
 export function getCampDisplayName(phase: CampPhase): string {
   return `《父母学习·孩子蜕变》共修营${getCampDisplayPhaseLabel(phase)}`;
@@ -172,7 +209,7 @@ export function isCampOrderRemarkForPhase(
 export function getCampSchedule(phase: CampPhase): CampSchedule {
   if (phase === '10') {
     return {
-      dateRange: '10 月 22 日至 11 月 4 日',
+      dateRange: '10 月 22 日至 10 月 28 日',
       deadline: '10 月 21 日 18:00',
     };
   }
