@@ -9,12 +9,14 @@ export const CAMP_CLASS_PHOTO_DOC_TYPES = [
   '上课图片4',
 ] as const;
 
-export type CampPhase = '1' | '2' | '3' | '4' | '5' | '6' | '8';
+export type CampPhase = '1' | '2' | '3' | '4' | '5' | '6' | '8' | '9';
 
 /**
  * 全部合法期次。注意：内部期号跳过 '7'，
  * 因为 URL `?scene=camp&phase=7` 已被「二阶共修营03期」路由占用（见 App.tsx）。
- * 2026 年 9 月第 06 期（对外命名）使用内部 phase '8'。
+ * - 内部 phase '6'：2026 年 8 月营期，对外「第5期」
+ * - 内部 phase '8'：2026 年 9 月营期，对外「第6期」
+ * - 内部 phase '9'：2026 年 10 月营期，对外「第7期」
  */
 const CAMP_KNOWN_PHASE_LIST: readonly CampPhase[] = [
   '1',
@@ -24,10 +26,11 @@ const CAMP_KNOWN_PHASE_LIST: readonly CampPhase[] = [
   '5',
   '6',
   '8',
+  '9',
 ];
 
 /** 当前最新一期（无 phase 参数时的默认展示期次） */
-export const CAMP_LATEST_PHASE: CampPhase = '8';
+export const CAMP_LATEST_PHASE: CampPhase = '9';
 
 export function isKnownCampPhase(value: string): value is CampPhase {
   return CAMP_KNOWN_PHASE_LIST.includes(value as CampPhase);
@@ -47,6 +50,7 @@ const CAMP_ENROLLMENT_DEADLINE_AT: Record<CampPhase, string> = {
   '5': '2026-07-21T18:00:00+08:00',
   '6': '2026-07-31T18:00:00+08:00',
   '8': '2026-09-06T18:00:00+08:00',
+  '9': '2026-10-21T18:00:00+08:00',
 };
 
 const CAMP_ENROLLMENT_DEADLINE_BYPASS_ACCOUNT_IDS = new Set([
@@ -82,6 +86,7 @@ export function getCampPhaseLabel(phase: CampPhase): string {
  *   因此该期订单标识独立为「第8期」。
  */
 export function getCampDisplayPhaseLabel(phase: CampPhase): string {
+  if (phase === '9') return '第7期';
   if (phase === '8') return '第6期';
   if (phase === '6') return '第5期';
   return getCampPhaseLabel(phase);
@@ -89,10 +94,10 @@ export function getCampDisplayPhaseLabel(phase: CampPhase): string {
 
 /**
  * 该期「已建档家长 200 元」是否为不退的参与费用（而非可退押金）。
- * 第 06 次开营（内部 phase '6'）起启用参与费用规则，06期（内部 phase '8'）延续。
+ * 第 06 次开营（内部 phase '6'）起启用参与费用规则，后续期次延续。
  */
 export function isCampParticipationFeeNonRefundable(phase: CampPhase): boolean {
-  return phase === '6' || phase === '8';
+  return phase === '6' || phase === '8' || phase === '9';
 }
 
 /** 报名截止时刻（毫秒时间戳，中国标准时间） */
@@ -159,6 +164,12 @@ export function isCampOrderRemarkForPhase(
 
 /** 营期展示文案（与群内最终通知不一致时以群内为准） */
 export function getCampSchedule(phase: CampPhase): CampSchedule {
+  if (phase === '9') {
+    return {
+      dateRange: '10 月 22 日至 11 月 4 日',
+      deadline: '10 月 21 日 18:00',
+    };
+  }
   if (phase === '8') {
     return {
       dateRange: '9 月 7 日至 9 月 20 日',
