@@ -21,6 +21,7 @@ import { BRAND_LOGO_GLOBAL_DOC_TYPE } from '../constants/brand';
 import {
   canBypassCampEnrollmentDeadline,
   getCampDisplayPhaseLabel,
+  getCampDisplayName,
   getCampPayDescription,
   getCampPayDescriptionAliases,
   getCampPhaseFromLocation,
@@ -395,6 +396,11 @@ export function Lead2026CampEnrollPage({
   const campPhase = useMemo(() => getCampPhaseFromLocation(), []);
   const campPhaseLabel = useMemo(
     () => getCampDisplayPhaseLabel(campPhase),
+    [campPhase]
+  );
+  /** 对外完整课程名（与群内通知一致），如「《父母学习·孩子蜕变》共修营第7期」 */
+  const campDisplayName = useMemo(
+    () => getCampDisplayName(campPhase),
     [campPhase]
   );
   const [enrollGateNowMs, setEnrollGateNowMs] = useState(() => Date.now());
@@ -1610,7 +1616,7 @@ export function Lead2026CampEnrollPage({
         <header className="mb-10 text-center">
           <BrandLogoMark
             url={brandLogoUrl}
-            title={`共修营报名 · ${campPhaseLabel}`}
+            title={campDisplayName}
             isPrimaryPageHeading
             className="mb-5"
           />
@@ -1849,7 +1855,7 @@ export function Lead2026CampEnrollPage({
         <div className="rounded-[2rem] border border-border bg-card p-10 shadow-organic">
           <BrandLogoMark
             url={brandLogoUrl}
-            title={`共修营报名 · ${campPhaseLabel}`}
+            title={campDisplayName}
             isPrimaryPageHeading
             className="mb-5"
           />
@@ -1857,7 +1863,7 @@ export function Lead2026CampEnrollPage({
             本期报名已结束
           </h2>
           <p className="mx-auto mt-4 max-w-md text-sm leading-relaxed text-foreground/85 md:text-base">
-            {campPhaseLabel}共修营报名已于 {campSchedule.deadline} 截止，请关注后续新一期开放通知。
+            {campDisplayName}报名已于 {campSchedule.deadline} 截止，请关注后续新一期开放通知。
           </p>
         </div>
       </div>
@@ -1869,12 +1875,12 @@ export function Lead2026CampEnrollPage({
       <header className="mb-10 text-center">
         <BrandLogoMark
           url={brandLogoUrl}
-          title={`共修营报名 · ${campPhaseLabel}`}
+          title={campDisplayName}
           isPrimaryPageHeading
           className="mb-5"
         />
         <p className="mx-auto mt-3 max-w-2xl text-sm text-muted-foreground">
-          打开本页即可查看{campPhaseLabel}共修营介绍。登录后请输入你的用户 ID，系统将自动匹配报名费用。
+          打开本页即可查看{campDisplayName}介绍。登录后请输入你的用户 ID，系统将自动匹配报名费用。
         </p>
 
         <div className="mt-4 flex flex-wrap items-center justify-center gap-3 text-xs text-muted-foreground">
