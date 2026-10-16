@@ -58,6 +58,46 @@ const CURRICULUM: { day: string; theme: string; value: string }[] = [
   { day: '14', theme: '目标 + 培优八步 · 结营', value: '固化成果，长期持续蜕变' },
 ];
 
+/** 07期（7 天营期）主干安排，由运营确认 */
+const CURRICULUM_7D: { day: string; theme: string; value: string }[] = [
+  {
+    day: '1',
+    theme: '开营仪式',
+    value: '《知而后能治》《不要把孩子培养成穷鬼》',
+  },
+  {
+    day: '2',
+    theme: '好孩子 + 四大内因',
+    value: '《好孩子》《四大内因》',
+  },
+  {
+    day: '3',
+    theme: '内驱力',
+    value: '《内驱力》',
+  },
+  {
+    day: '4',
+    theme: '好成绩的真相',
+    value: '《思维行为结果／想学成绩结果》',
+  },
+  {
+    day: '5',
+    theme: '如何启动孩子想要',
+    value: '《黄豆论》',
+  },
+  {
+    day: '6',
+    theme: '透过现象看本质',
+    value:
+      '《道德经》第12章 · 五项基本原则 + 如实处理 · 如实观照—花草牛羊 · 拖沓磨蹭',
+  },
+  {
+    day: '7',
+    theme: '梦想成真',
+    value: '《培优八步》《梦想成真》',
+  },
+];
+
 const OUTCOMES = [
   '掌握根源解题思路，不再盲目焦虑',
   '找到唤醒内驱力的完整路径',
@@ -108,8 +148,11 @@ export function CampIntroShowcase({ campPhase, campPhaseLabel, schedule }: Props
   const isNonRefundableParticipationFee = isCampParticipationFeeNonRefundable(campPhase);
   const participationFeeYuan = getCampParticipationFeeYuan(campPhase);
   const campDurationDays = getCampDurationDays(campPhase);
-  /** 按当期营期天数截取主干安排（07期为 7 天） */
-  const curriculumDays = CURRICULUM.slice(0, campDurationDays);
+  /** 按当期营期天数取主干安排：7 天营期用运营确认的 7 天课表，其余沿用 14 天课表并截取 */
+  const curriculumDays =
+    campDurationDays === 7
+      ? CURRICULUM_7D
+      : CURRICULUM.slice(0, campDurationDays);
 
   return (
     <div className="relative mb-6 space-y-6 overflow-hidden md:space-y-7">
