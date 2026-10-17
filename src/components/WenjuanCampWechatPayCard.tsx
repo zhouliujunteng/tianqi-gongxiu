@@ -28,7 +28,7 @@ import {
   fetchSelfPayStatus,
   isSelfPayEnabled,
 } from '../payment/selfPay';
-import { useWechatOpenId } from '../payment/useWechatOpenId';
+import { useWechatOpenId, redirectToWechatOpenId } from '../payment/useWechatOpenId';
 import { invokeWechatJsapiPay, isWeixinBrowser } from '../payment/weixinBrowser';
 import { friendlyRequestErrorMessage } from '../utils/friendlyRequestError';
 
@@ -107,7 +107,12 @@ export function WenjuanCampWechatPayCard({
   /** 微信内 + 配置了自建支付服务 → 走自建通道（指定商户号） */
   const useSelfPay = isSelfPayEnabled() && weixin;
   /** 自建通道需要 openId；Zion 读不到时由静默 OAuth 换取 */
-  const selfOpenId = useWechatOpenId();
+  /**
+   * 注意：这里不能一挂载就静默跳转去拿 openId —— 家长正在填 ID 时页面被跳走，
+   * 回来输入全没了（微信内表现为「页面一直刷新、填不了 ID」）。
+   * openId 由页面在登录完成后提前换取；此处只在点支付仍拿不到时兜底跳转。
+   */
+  const selfOpenId = useWechatOpenId(false);
   const effectiveOpenId = openId?.trim() || selfOpenId;
 
   const amountForCreatePay = wenjuanPayAmountForCreateWechatPaymentFromYuan(
@@ -130,6 +135,16 @@ export function WenjuanCampWechatPayCard({
     setErr(null);
     if (!accountId) {
       setErr('未获取到当前登录帐户编号，请重新登录后再试。');
+      return;
+    }
+    // 自建通道必须要有 openId 才能 JSAPI 下单。缺的时候先静默换一次再回来，
+    // 不要先建单再报错（否则会留下一堆未支付的废单）。
+    if (useSelfPay && !effectiveOpenId) {
+      if (redirectToWechatOpenId()) {
+        setErr('正在获取微信支付身份，页面会刷新一次，请稍后再次点击支付。');
+        return;
+      }
+      setErr('未能获取微信支付身份，请重新打开本页后再支付。');
       return;
     }
     if (!/^\d+$/.test(normalizedUserLibraryId) && !normalizedPublicAccountId) {

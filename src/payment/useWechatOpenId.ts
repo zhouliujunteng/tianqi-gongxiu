@@ -16,7 +16,50 @@ import { isWeixinBrowser } from './weixinBrowser';
 const OPENID_STORAGE_KEY = 'tqwj_wx_open_id';
 /** 与 Zion 登录用的 state 区分，避免两边抢用同一个 code */
 const OAUTH_STATE = 'payopenid';
+/**
+ * 防重试标记。
+ *
+ * 重要：必须存在 localStorage（不能只用 sessionStorage）——微信内 OAuth 回跳后
+ * sessionStorage 可能丢失，导致每次回来都以为「还没尝试过」而再次跳转，
+ * 表现为页面无限刷新、家长填不了 ID。
+ * 记录时间戳，有效期内不再跳转；过期后允许再试一次。
+ */
 const ATTEMPTED_KEY = 'tqwj_wx_open_id_attempted';
+const ATTEMPTED_AT_KEY = 'tqwj_wx_open_id_attempted_at';
+/** 同一次尝试的有效期（毫秒）：期间不再发起静默跳转 */
+const ATTEMPT_TTL_MS = 10 * 60 * 1000;
+
+function hasAttemptedRecently(): boolean {
+  try {
+    const at = Number(window.localStorage.getItem(ATTEMPTED_AT_KEY) ?? '0');
+    if (at && Date.now() - at < ATTEMPT_TTL_MS) return true;
+    // 兼容旧版本只写了 sessionStorage 的情况
+    return window.sessionStorage.getItem(ATTEMPTED_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function markAttempted(): void {
+  try {
+    window.localStorage.setItem(ATTEMPTED_KEY, '1');
+    window.localStorage.setItem(ATTEMPTED_AT_KEY, String(Date.now()));
+    window.sessionStorage.setItem(ATTEMPTED_KEY, '1');
+  } catch {
+    /* ignore */
+  }
+}
+
+/** 换取成功后清掉标记，下次需要时可以重新走一次 */
+function clearAttempted(): void {
+  try {
+    window.localStorage.removeItem(ATTEMPTED_KEY);
+    window.localStorage.removeItem(ATTEMPTED_AT_KEY);
+    window.sessionStorage.removeItem(ATTEMPTED_KEY);
+  } catch {
+    /* ignore */
+  }
+}
 
 /** 收款公众号 AppID（与 Zion 微信授权、pay-service 的 WECHAT_APP_ID 一致） */
 const WECHAT_OAUTH_APP_ID = 'wx6e046fecc7bfb0d5';
@@ -96,6 +139,7 @@ export function consumePayOpenIdCallback(): boolean {
     inFlight = false;
     if (got) {
       storeWechatOpenId(got);
+      clearAttempted();
       notifyOpenIdReady(got);
     }
   })();
@@ -113,15 +157,40 @@ function buildSilentOAuthUrl(redirectUri: string): string {
 }
 
 /**
- * 返回可用的公众号 openId（没有时返回 null）。
- * 需要时会先把浏览器跳转到微信 OAuth，回跳后自动换取并缓存。
+ * 按需发起静默跳转换取 openId。
+ *
+ * 只在用户真正要支付时调用（而不是组件一挂载就跳），
+ * 避免家长正在填 ID 时页面被跳走、输入内容丢失。
+ * 返回 false 表示当前环境不需要/无法跳转。
  */
-export function useWechatOpenId(): string | null {
+export function redirectToWechatOpenId(): boolean {
+  if (typeof window === 'undefined') return false;
+  if (!isSelfPayEnabled() || !isWeixinBrowser()) return false;
+  try {
+    // 用户主动触发的，允许再试一次（清掉防重试标记）
+    clearAttempted();
+    markAttempted();
+    const redirectUri = window.location.href.split('#')[0];
+    window.location.assign(buildSilentOAuthUrl(redirectUri));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 返回可用的公众号 openId（没有时返回 null）。
+ *
+ * `autoRedirect = false` 时不在挂载阶段跳转，避免打断家长填写 ID；
+ * 由支付按钮在真正需要时调用 `redirectToWechatOpenId()`。
+ */
+export function useWechatOpenId(autoRedirect = true): string | null {
   const [openId, setOpenId] = useState<string | null>(() => getStoredWechatOpenId());
 
   useLayoutEffect(() => {
     if (openId) return;
     if (!isSelfPayEnabled() || !isWeixinBrowser()) return;
+    if (!autoRedirect) return;
 
     // App 里已经接管 code 并正在换取：等它的广播即可，别再跳转
     if (hasInFlightOpenIdExchange()) {
@@ -140,16 +209,12 @@ export function useWechatOpenId(): string | null {
       return;
     }
 
-    // 只尝试一次，失败也不再跳转，避免死循环
-    try {
-      if (window.sessionStorage.getItem(ATTEMPTED_KEY) === '1') return;
-      window.sessionStorage.setItem(ATTEMPTED_KEY, '1');
-    } catch {
-      /* ignore */
-    }
+    // 只尝试一次，失败也不再跳转，避免死循环（微信内回跳会丢 sessionStorage，故用 localStorage）
+    if (hasAttemptedRecently()) return;
+    markAttempted();
     const redirectUri = window.location.href.split('#')[0];
     window.location.assign(buildSilentOAuthUrl(redirectUri));
-  }, [openId]);
+  }, [autoRedirect, openId]);
 
   return openId;
 }

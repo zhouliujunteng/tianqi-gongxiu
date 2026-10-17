@@ -82,6 +82,7 @@ import {
 } from '../payment/useAdminSelfPaidOrders';
 import { useSelfPayPaid } from '../payment/useSelfPayPaid';
 import { isWeixinBrowser } from '../payment/weixinBrowser';
+import { useWechatOpenId } from '../payment/useWechatOpenId';
 import { uploadImageViaZion } from '../utils/zionImageUpload';
 
 type Props = {
@@ -489,6 +490,14 @@ export function Lead2026CampEnrollPage({
 
   const meRow = meData?.account?.[0];
   const loginAccountId = jwtAccountId ?? meRow?.id ?? '';
+  /**
+   * 微信内支付需要 openId，登录完成后就先静默换一次。
+   * 必须在这里（登录之后、家长还没填 ID 之前）做——放在支付卡片里会跳走页面，
+   * 家长填的 ID 被清空，表现为「页面一直刷新、填不了 ID」。
+   * Zion 帐号行自带 openId 时不再跳转；hook 内部有 10 分钟防重试，最多只跳一次。
+   */
+  const meOpenId = extractWechatOpenId(meRow);
+  useWechatOpenId(Boolean(token) && !meLoading && !meOpenId);
   const isCampAdmin = CAMP_ADMIN_ACCOUNT_IDS.has(loginAccountId);
   const isCampCheckinAdmin = CAMP_CHECKIN_ADMIN_ACCOUNT_IDS.has(loginAccountId);
   const isCampWechatAdmin = getCampWechatAdminAccountIds().has(loginAccountId);
@@ -782,7 +791,16 @@ export function Lead2026CampEnrollPage({
     return false;
   }, [apolloClient, campPayDescriptionAliases, payAccountId, refetchEligibility]);
 
-  const [miniProgramUserId, setMiniProgramUserId] = useState('');
+  /**
+   * 报名 ID 从本地缓存恢复：万一中间被静默授权跳走一次，家长不用重填。
+   * 换期次或「退出并换帐号」时缓存会被清掉。
+   */
+  const [miniProgramUserId, setMiniProgramUserId] = useState(
+    () =>
+      (savedCampContext?.phase === campPhase
+        ? savedCampContext.miniProgramUserId
+        : '') ?? ''
+  );
   const miniProgramIdValid = useMemo(
     () => /^\d{5,6}$/.test(miniProgramUserId.trim()),
     [miniProgramUserId]
