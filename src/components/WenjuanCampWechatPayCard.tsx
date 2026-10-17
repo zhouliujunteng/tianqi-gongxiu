@@ -28,7 +28,12 @@ import {
   fetchSelfPayStatus,
   isSelfPayEnabled,
 } from '../payment/selfPay';
-import { useWechatOpenId, redirectToWechatOpenId } from '../payment/useWechatOpenId';
+import {
+  useWechatOpenId,
+  redirectToWechatOpenId,
+  getLastWechatOpenIdError,
+  clearLastWechatOpenIdError,
+} from '../payment/useWechatOpenId';
 import { invokeWechatJsapiPay, isWeixinBrowser } from '../payment/weixinBrowser';
 import { friendlyRequestErrorMessage } from '../utils/friendlyRequestError';
 
@@ -140,6 +145,13 @@ export function WenjuanCampWechatPayCard({
     // 自建通道必须要有 openId 才能 JSAPI 下单。缺的时候先静默换一次再回来，
     // 不要先建单再报错（否则会留下一堆未支付的废单）。
     if (useSelfPay && !effectiveOpenId) {
+      // 上一次换取已经失败过：别再静默跳转（会刷新页面、看起来像付不了款），直接把原因告诉家长
+      const lastErr = getLastWechatOpenIdError();
+      if (lastErr) {
+        setErr(`未能获取微信支付身份（${lastErr}）。请截图联系老师，或关闭本页后从微信重新打开。`);
+        clearLastWechatOpenIdError();
+        return;
+      }
       if (redirectToWechatOpenId()) {
         setErr('正在获取微信支付身份，页面会刷新一次，请稍后再次点击支付。');
         return;

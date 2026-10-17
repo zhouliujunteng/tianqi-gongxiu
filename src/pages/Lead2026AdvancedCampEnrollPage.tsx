@@ -65,7 +65,6 @@ import {
 } from '../payment/useAdminSelfPaidOrders';
 import { useSelfPayPaid } from '../payment/useSelfPayPaid';
 import { isWeixinBrowser } from '../payment/weixinBrowser';
-import { useWechatOpenId } from '../payment/useWechatOpenId';
 import { friendlyRequestErrorMessage } from '../utils/friendlyRequestError';
 
 type Props = {
@@ -582,9 +581,7 @@ export function Lead2026AdvancedCampEnrollPage({
   });
   const meRow = meData?.account?.[0];
   const loginAccountId = String(jwtAccountId ?? meRow?.id ?? '').trim();
-  /** 登录完成后先静默换取 openId（避免支付时再跳转把家长填的内容清空） */
-  const meOpenId = extractWechatOpenId(meRow);
-  useWechatOpenId(Boolean(token) && !meOpenId);
+  // 微信支付用的 openId 在 main.tsx 渲染前就已准备好，这里不再跳转（避免家长下滑时页面刷新回顶部）
   const isAdvancedCampWechatAdmin =
     isAdvancedCampWechatAdminAccount(loginAccountId);
   const canEnrollAfterDeadline =

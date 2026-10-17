@@ -201,6 +201,117 @@ function buildSilentOAuthUrl(redirectUri: string): string {
   );
 }
 
+/** 最近一次换取失败的原因（给支付卡片展示，便于家长/老师反馈） */
+const LAST_ERROR_KEY = 'tqwj_wx_open_id_last_error';
+
+export function getLastWechatOpenIdError(): string | null {
+  try {
+    return window.localStorage.getItem(LAST_ERROR_KEY);
+  } catch {
+    return null;
+  }
+}
+
+/** 展示过一次就清掉，下次点支付允许再静默试一次 */
+export function clearLastWechatOpenIdError(): void {
+  setLastWechatOpenIdError(null);
+}
+
+function setLastWechatOpenIdError(msg: string | null): void {
+  try {
+    if (msg) window.localStorage.setItem(LAST_ERROR_KEY, msg);
+    else window.localStorage.removeItem(LAST_ERROR_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** URL 上带着别的登录回调参数（Zion 登录的 code / jwt）时不能抢着跳走 */
+function hasOtherAuthParamsInUrl(): boolean {
+  try {
+    const sp = new URLSearchParams(window.location.search);
+    const hp = new URLSearchParams(window.location.hash.replace(/^#\/?\??/, ''));
+    for (const k of ['code', 'token', 'jwt', 'access_token', 'authorization']) {
+      if (sp.has(k) || hp.has(k)) return true;
+    }
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+async function exchangeCodeWithTimeout(code: string, ms: number): Promise<string | null> {
+  const base = serviceBaseUrl();
+  if (!base) return null;
+  const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const timer = window.setTimeout(() => ctrl?.abort(), ms);
+  try {
+    const res = await fetch(`${base}/api/oauth/openid?code=${encodeURIComponent(code)}`, {
+      signal: ctrl?.signal,
+    });
+    const json = (await res.json()) as { openId?: string; error?: string };
+    const got = json.openId?.trim() || null;
+    setLastWechatOpenIdError(got ? null : json.error || `HTTP ${res.status}`);
+    return got;
+  } catch (e) {
+    setLastWechatOpenIdError(e instanceof Error ? e.message : String(e));
+    return null;
+  } finally {
+    window.clearTimeout(timer);
+  }
+}
+
+/**
+ * 在 React 渲染之前（main.tsx）把 openId 准备好。
+ *
+ * 以前是页面渲染出来之后才静默跳转一次：家长看到页面开始往下滑时，跳转刚好完成，
+ * 表现为「一滑就刷新、回到顶部」，而且拿不到 openId 时点支付又会再跳一次。
+ * 现在在首屏「加载中…」阶段就完成跳转与换取，页面渲染之后不会再因为 openId 跳走。
+ *
+ * 返回 false 表示已经发起跳转，调用方不要再渲染页面。
+ */
+export async function bootstrapWechatOpenId(): Promise<boolean> {
+  if (typeof window === 'undefined') return true;
+  if (!isSelfPayEnabled() || !isWeixinBrowser()) return true;
+
+  const sp = new URLSearchParams(window.location.search);
+  const code = sp.get('code')?.trim();
+  const state = sp.get('state')?.trim();
+
+  // ① 刚从静默 OAuth 回来：先换 openId（最多等 5 秒），再渲染页面
+  if (code && state === OAUTH_STATE) {
+    sp.delete('code');
+    sp.delete('state');
+    const q = sp.toString();
+    window.history.replaceState(
+      {},
+      document.title,
+      `${window.location.pathname}${q ? `?${q}` : ''}${window.location.hash}`
+    );
+    const got = await exchangeCodeWithTimeout(code, 5000);
+    if (got) {
+      storeWechatOpenId(got);
+      clearAttempted();
+      removeAttemptMarkerFromUrl();
+    }
+    return true;
+  }
+
+  // ② 已有 openId / 刚试过 / URL 上正带着登录回调参数 → 直接渲染
+  if (getStoredWechatOpenId()) return true;
+  if (hasAttemptMarkerInUrl() || hasAttemptedRecently()) return true;
+  if (hasOtherAuthParamsInUrl()) return true;
+
+  // ③ 首屏还没渲染任何内容，此时静默跳转一次家长无感
+  try {
+    markAttempted();
+    window.location.replace(buildSilentOAuthUrl(window.location.href.split('#')[0]));
+    return false;
+  } catch {
+    return true;
+  }
+}
+
 /**
  * 按需发起静默跳转换取 openId。
  *

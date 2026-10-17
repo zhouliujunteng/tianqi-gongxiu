@@ -82,7 +82,6 @@ import {
 } from '../payment/useAdminSelfPaidOrders';
 import { useSelfPayPaid } from '../payment/useSelfPayPaid';
 import { isWeixinBrowser } from '../payment/weixinBrowser';
-import { useWechatOpenId } from '../payment/useWechatOpenId';
 import { uploadImageViaZion } from '../utils/zionImageUpload';
 
 type Props = {
@@ -490,16 +489,7 @@ export function Lead2026CampEnrollPage({
 
   const meRow = meData?.account?.[0];
   const loginAccountId = jwtAccountId ?? meRow?.id ?? '';
-  /**
-   * 微信内支付需要 openId，登录完成后就先静默换一次。
-   * 必须在这里（登录之后、家长还没填 ID 之前）做——放在支付卡片里会跳走页面，
-   * 家长填的 ID 被清空，表现为「页面一直刷新、填不了 ID」。
-   * Zion 帐号行自带 openId 时不再跳转；hook 内部有 10 分钟防重试，最多只跳一次。
-   */
-  const meOpenId = extractWechatOpenId(meRow);
-  // 不等 ME 查询完成：此时页面还是「正在确认登录状态…」，跳一次家长看不到；
-  // 若等到加载完再跳，就会变成家长正在下滑时页面突然刷新回到顶部。
-  useWechatOpenId(Boolean(token) && !meOpenId);
+  // 微信支付用的 openId 在 main.tsx 渲染前就已准备好，这里不再跳转（避免家长下滑时页面刷新回顶部）
   const isCampAdmin = CAMP_ADMIN_ACCOUNT_IDS.has(loginAccountId);
   const isCampCheckinAdmin = CAMP_CHECKIN_ADMIN_ACCOUNT_IDS.has(loginAccountId);
   const isCampWechatAdmin = getCampWechatAdminAccountIds().has(loginAccountId);
