@@ -184,13 +184,23 @@ export function getCampPayDescription(phase: CampPhase): string {
  * - 旧格式：2026共修营-第2期
  * - 更旧格式：2026共修营
  */
+/**
+ * 只有这几个最老的期次，历史支付描述才是裸的「2026共修营」（当时还没按期次区分）。
+ * 新期次**绝不能**带这条裸别名：否则历史期次的已付订单会被当成本期已付，
+ * 家长不用交钱就能进营。
+ */
+const CAMP_LEGACY_BARE_DESCRIPTION_PHASES = new Set<CampPhase>(['1', '2']);
+
 export function getCampPayDescriptionAliases(phase: CampPhase): string[] {
   const phaseLabel = getCampPhaseLabel(phase);
-  return [
+  const aliases = [
     `${WENJUAN_CAMP_ORDER_TYPE}${phaseLabel}`,
     `${WENJUAN_CAMP_ORDER_TYPE}-${phaseLabel}`,
-    WENJUAN_CAMP_ORDER_TYPE,
   ];
+  if (CAMP_LEGACY_BARE_DESCRIPTION_PHASES.has(phase)) {
+    aliases.push(WENJUAN_CAMP_ORDER_TYPE);
+  }
+  return aliases;
 }
 
 /** 订单备注是否属于指定期次（后台筛选已支付学员） */

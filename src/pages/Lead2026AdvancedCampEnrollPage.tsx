@@ -316,7 +316,7 @@ function CourseDetail({
             {['天启无书', '纠偏培优体系', phaseLabel].map((tag) => (
               <span
                 key={tag}
-                className="rounded-full border border-white/35 bg-white/18 px-3 py-1 text-xs font-semibold text-white backdrop-blur"
+                className="rounded-full border border-white/35 bg-black/28 px-3 py-1 text-xs font-semibold text-white"
               >
                 {tag}
               </span>
@@ -334,22 +334,22 @@ function CourseDetail({
               从现象进入本质，从治标走向根源。面向一阶共修后的家庭，帮助父母完成教育认知的深度升级。
             </p>
             {isPhase2Course ? (
-              <p className="mt-3 inline-flex rounded-full border border-white/35 bg-white/18 px-4 py-2 text-sm font-semibold text-white backdrop-blur">
+              <p className="mt-3 inline-flex rounded-full border border-white/35 bg-black/28 px-4 py-2 text-sm font-semibold text-white">
                 课程内容全新制作，聚焦透过现象看到本质。
               </p>
             ) : null}
             <div className="mt-6 grid gap-3 sm:grid-cols-3">
-              <div className="rounded-2xl border border-white/30 bg-white/18 p-3 backdrop-blur">
+              <div className="rounded-2xl border border-white/30 bg-black/28 p-3">
                 <p className="text-xs font-semibold text-white/75">开营时间</p>
                 <p className="mt-1 font-display text-lg text-white">{schedule.dateRange}</p>
               </div>
-              <div className="rounded-2xl border border-white/30 bg-white/18 p-3 backdrop-blur">
+              <div className="rounded-2xl border border-white/30 bg-black/28 p-3">
                 <p className="text-xs font-semibold text-white/75">学习时段</p>
                 <p className="mt-1 text-sm font-semibold leading-snug text-white">
                   {schedule.timeSlots.join(' / ')}
                 </p>
               </div>
-              <div className="rounded-2xl border border-white/30 bg-white/18 p-3 backdrop-blur">
+              <div className="rounded-2xl border border-white/30 bg-black/28 p-3">
                 <p className="text-xs font-semibold text-white/75">报名截止</p>
                 <p className="mt-1 font-display text-lg text-white">{schedule.deadline}</p>
               </div>
@@ -584,7 +584,7 @@ export function Lead2026AdvancedCampEnrollPage({
   const loginAccountId = String(jwtAccountId ?? meRow?.id ?? '').trim();
   /** 登录完成后先静默换取 openId（避免支付时再跳转把家长填的内容清空） */
   const meOpenId = extractWechatOpenId(meRow);
-  useWechatOpenId(Boolean(token) && !meLoading && !meOpenId);
+  useWechatOpenId(Boolean(token) && !meOpenId);
   const isAdvancedCampWechatAdmin =
     isAdvancedCampWechatAdminAccount(loginAccountId);
   const canEnrollAfterDeadline =
@@ -847,6 +847,7 @@ export function Lead2026AdvancedCampEnrollPage({
     userLibraryId: miniRow?.id ?? null,
     publicAccountId: fallbackPublicAccountId,
     aliases: payDescriptionAliases,
+    orderType: WENJUAN_ADVANCED_CAMP_ORDER_TYPE,
   });
 
   const [payUnlocked, setPayUnlocked] = useState(() => {

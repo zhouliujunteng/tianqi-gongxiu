@@ -497,7 +497,9 @@ export function Lead2026CampEnrollPage({
    * Zion 帐号行自带 openId 时不再跳转；hook 内部有 10 分钟防重试，最多只跳一次。
    */
   const meOpenId = extractWechatOpenId(meRow);
-  useWechatOpenId(Boolean(token) && !meLoading && !meOpenId);
+  // 不等 ME 查询完成：此时页面还是「正在确认登录状态…」，跳一次家长看不到；
+  // 若等到加载完再跳，就会变成家长正在下滑时页面突然刷新回到顶部。
+  useWechatOpenId(Boolean(token) && !meOpenId);
   const isCampAdmin = CAMP_ADMIN_ACCOUNT_IDS.has(loginAccountId);
   const isCampCheckinAdmin = CAMP_CHECKIN_ADMIN_ACCOUNT_IDS.has(loginAccountId);
   const isCampWechatAdmin = getCampWechatAdminAccountIds().has(loginAccountId);
@@ -691,13 +693,13 @@ export function Lead2026CampEnrollPage({
     });
   }, [campPayDescriptionAliases, eligibilityData]);
 
-  const [campPayUnlocked, setCampPayUnlocked] = useState(() => {
-    try {
-      return sessionStorage.getItem(WENJUAN_CAMP_PAY_OK_STORAGE_KEY) === '1';
-    } catch {
-      return false;
-    }
-  });
+  /**
+   * 「已付放行」标记按「期次 + 报名ID」隔离（具体 key 在 ID 解析之后计算，见下）。
+   *
+   * 之前是一个全局 sessionStorage 开关：同一次会话里只要付过一次（或点过手动放行），
+   * 之后换成任何别的 ID 都会被当成已付直接进营。现在换 ID / 换期次都要重新付。
+   */
+  const [campPayUnlocked, setCampPayUnlocked] = useState(false);
 
   useEffect(() => {
     if (paidViaZion) setCampPayUnlocked(true);
@@ -826,6 +828,12 @@ export function Lead2026CampEnrollPage({
     miniIdentity?.trim() || (publicStudentFound ? '公众号学员名单' : null);
   const matchedForCampPricing = miniFound || publicStudentFound;
 
+  /** 本期 + 本 ID 的「已付放行」标记 key */
+  const campPayOkKey = useMemo(() => {
+    const id = String(miniRow?.id ?? '').trim() || miniProgramUserId.trim() || 'none';
+    return `${WENJUAN_CAMP_PAY_OK_STORAGE_KEY}:${campPhase}:${id}`;
+  }, [campPhase, miniProgramUserId, miniRow?.id]);
+
   /** 自建支付通道：pay-service 回调把订单表状态置为「已支付」，此处补一路已付判定 */
   const { paid: selfPayPaid } = useSelfPayPaid({
     enabled: true,
@@ -833,10 +841,28 @@ export function Lead2026CampEnrollPage({
     publicAccountId:
       !miniRow && publicStudentFound ? miniProgramUserId.trim() : null,
     aliases: campPayDescriptionAliases,
+    orderType: WENJUAN_CAMP_ORDER_TYPE,
   });
   useEffect(() => {
     if (selfPayPaid) setCampPayUnlocked(true);
   }, [selfPayPaid]);
+
+  /**
+   * 换 ID / 换期次时重新判定：后端已确认已付的保持放行，否则只看本 ID 的放行标记。
+   */
+  useEffect(() => {
+    if (paidViaZion || selfPayPaid) {
+      setCampPayUnlocked(true);
+      return;
+    }
+    let ok = false;
+    try {
+      ok = sessionStorage.getItem(campPayOkKey) === '1';
+    } catch {
+      ok = false;
+    }
+    setCampPayUnlocked(ok);
+  }, [campPayOkKey, paidViaZion, selfPayPaid]);
   const amountYuan = useMemo(
     () =>
       publicStudentFound
@@ -2054,7 +2080,15 @@ export function Lead2026CampEnrollPage({
                         description={campPayDescription}
                         openId={extractWechatOpenId(meRow)}
                         confirmPaidWithBackend={confirmPaidWithBackend}
-                        onPaidMarked={() => setCampPayUnlocked(true)}
+                        paidOkStorageKey={campPayOkKey}
+                        onPaidMarked={() => {
+                          try {
+                            sessionStorage.setItem(campPayOkKey, '1');
+                          } catch {
+                            /* ignore */
+                          }
+                          setCampPayUnlocked(true);
+                        }}
                         campWechatContact={campWechatContactForPay}
                       />
                     ) : null}
@@ -2073,10 +2107,7 @@ export function Lead2026CampEnrollPage({
                           className="mt-4 min-h-12 rounded-full border-2 border-secondary bg-transparent px-6 py-3 text-sm font-bold text-secondary transition duration-300 ease-out hover:bg-secondary/10"
                           onClick={() => {
                             try {
-                              sessionStorage.setItem(
-                                WENJUAN_CAMP_PAY_OK_STORAGE_KEY,
-                                '1'
-                              );
+                              sessionStorage.setItem(campPayOkKey, '1');
                             } catch {
                               /* ignore */
                             }

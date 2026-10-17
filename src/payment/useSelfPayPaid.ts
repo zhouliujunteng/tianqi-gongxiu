@@ -6,13 +6,25 @@ import {
 } from './selfPay';
 import { WENJUAN_ORDER_STATUS_PAID } from '../constants/lead2026';
 
-function matchesAlias(row: SelfPayOrderRow, aliases: readonly string[]): boolean {
+/**
+ * 判断订单是否属于本期次。
+ *
+ * 关键：只认「订单备注」里的期次标识，**不能**用「订单类型」顶替。
+ * 所有共修营订单的订单类型都是「2026共修营」，如果拿订单类型去匹配别名，
+ * 家长只要付过第2/3/4/6/8期中任意一期，就会被判定为「本期已付」而免单进营。
+ */
+function matchesAlias(
+  row: SelfPayOrderRow,
+  aliases: readonly string[],
+  orderType?: string | null
+): boolean {
   const remark = String(row.ud_dingdanbeizhu_439d3a ?? '').trim();
-  const orderType = String(row.ud_dingdanleixing_3fb8b8 ?? '').trim();
-  return (
-    (Boolean(remark) && aliases.includes(remark)) ||
-    (Boolean(orderType) && aliases.includes(orderType))
-  );
+  const type = String(row.ud_dingdanleixing_3fb8b8 ?? '').trim();
+  const expectedType = String(orderType ?? '').trim();
+  // 给了订单类型就要求一致，避免把别的课程订单算进来
+  if (expectedType && type !== expectedType) return false;
+  if (!remark) return false;
+  return aliases.includes(remark);
 }
 
 /**
@@ -27,10 +39,13 @@ export function useSelfPayPaid(input: {
   userLibraryId: string | number | null;
   publicAccountId?: string | null;
   aliases: readonly string[];
+  /** 订单类型（如「2026共修营」）：用于排除其它课程的订单 */
+  orderType?: string | null;
   /** 未确认已付时的轮询间隔（毫秒），默认 4000 */
   pollMs?: number;
 }): { paid: boolean; loading: boolean; refetch: () => void } {
-  const { enabled, userLibraryId, publicAccountId, aliases, pollMs = 4000 } = input;
+  const { enabled, userLibraryId, publicAccountId, aliases, orderType, pollMs = 4000 } =
+    input;
 
   const hasIdentifier = useMemo(() => {
     const lib = String(userLibraryId ?? '').trim();
@@ -73,9 +88,9 @@ export function useSelfPayPaid(input: {
     return rows.some(
       (row) =>
         String(row.ud_dingdanleixing_3ade69 ?? '').trim() === WENJUAN_ORDER_STATUS_PAID &&
-        matchesAlias(row, aliases)
+        matchesAlias(row, aliases, orderType)
     );
-  }, [aliases, rows]);
+  }, [aliases, orderType, rows]);
 
   useEffect(() => {
     if (!active || paid) return;

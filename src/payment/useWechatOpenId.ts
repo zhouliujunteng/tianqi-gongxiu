@@ -140,17 +140,62 @@ export function consumePayOpenIdCallback(): boolean {
     if (got) {
       storeWechatOpenId(got);
       clearAttempted();
+      removeAttemptMarkerFromUrl();
       notifyOpenIdReady(got);
     }
   })();
   return true;
 }
 
+/**
+ * 回跳标记：写在 redirect_uri 上，微信跳回来时 URL 里就带它。
+ *
+ * 这样即使 localStorage / sessionStorage 在微信里被清空（隐私模式、跨 webview），
+ * 也能认出「刚刚已经试过一次」，杜绝无限跳转。
+ */
+const ATTEMPT_MARKER_PARAM = 'tqws_oid';
+
+function hasAttemptMarkerInUrl(): boolean {
+  try {
+    return (
+      new URLSearchParams(window.location.search).get(ATTEMPT_MARKER_PARAM) === '1'
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** 换取成功后把标记从地址栏擦掉，避免外链带着它导致新用户拿不到 openId */
+function removeAttemptMarkerFromUrl(): void {
+  try {
+    const sp = new URLSearchParams(window.location.search);
+    if (!sp.has(ATTEMPT_MARKER_PARAM)) return;
+    sp.delete(ATTEMPT_MARKER_PARAM);
+    const q = sp.toString();
+    window.history.replaceState(
+      {},
+      document.title,
+      `${window.location.pathname}${q ? `?${q}` : ''}${window.location.hash}`
+    );
+  } catch {
+    /* ignore */
+  }
+}
+
 function buildSilentOAuthUrl(redirectUri: string): string {
+  let target = redirectUri;
+  try {
+    const u = new URL(redirectUri);
+    u.searchParams.set(ATTEMPT_MARKER_PARAM, '1');
+    target = u.toString();
+  } catch {
+    const sep = redirectUri.includes('?') ? '&' : '?';
+    target = `${redirectUri}${sep}${ATTEMPT_MARKER_PARAM}=1`;
+  }
   return (
     'https://open.weixin.qq.com/connect/oauth2/authorize' +
     `?appid=${WECHAT_OAUTH_APP_ID}` +
-    `&redirect_uri=${encodeURIComponent(redirectUri)}` +
+    `&redirect_uri=${encodeURIComponent(target)}` +
     `&response_type=code&scope=snsapi_base&state=${OAUTH_STATE}` +
     '#wechat_redirect'
   );
@@ -190,30 +235,39 @@ export function useWechatOpenId(autoRedirect = true): string | null {
   useLayoutEffect(() => {
     if (openId) return;
     if (!isSelfPayEnabled() || !isWeixinBrowser()) return;
-    if (!autoRedirect) return;
 
-    // App 里已经接管 code 并正在换取：等它的广播即可，别再跳转
-    if (hasInFlightOpenIdExchange()) {
-      const onReady = (e: Event): void => {
-        const v = (e as CustomEvent<string>).detail;
-        if (v) setOpenId(v);
-      };
-      window.addEventListener(OPENID_READY_EVENT, onReady);
-      return () => window.removeEventListener(OPENID_READY_EVENT, onReady);
-    }
+    // 无论是否负责跳转，都监听 App 换取成功的广播：
+    // 微信回跳那一帧本组件可能比 App 先挂载，此时 localStorage 还是空的，
+    // 不监听的话整页都不会再刷新，支付时会误判「拿不到 openId」。
+    const onReady = (e: Event): void => {
+      const v = (e as CustomEvent<string>).detail;
+      if (v) setOpenId(v);
+    };
+    window.addEventListener(OPENID_READY_EVENT, onReady);
 
     // 可能换取已完成但本组件是后挂载的
     const stored = getStoredWechatOpenId();
     if (stored) {
       setOpenId(stored);
+      window.removeEventListener(OPENID_READY_EVENT, onReady);
       return;
     }
 
-    // 只尝试一次，失败也不再跳转，避免死循环（微信内回跳会丢 sessionStorage，故用 localStorage）
-    if (hasAttemptedRecently()) return;
-    markAttempted();
-    const redirectUri = window.location.href.split('#')[0];
-    window.location.assign(buildSilentOAuthUrl(redirectUri));
+    let redirecting = false;
+    if (autoRedirect && !hasAttemptMarkerInUrl() && !hasAttemptedRecently()) {
+      // App 正在换取时不要抢着再跳一次
+      if (!hasInFlightOpenIdExchange()) {
+        // 只尝试一次，失败也不再跳转，避免死循环：
+        // ① localStorage 时间戳（10 分钟内）② 回跳 URL 上的标记（防存储被清空）
+        markAttempted();
+        redirecting = true;
+        const redirectUri = window.location.href.split('#')[0];
+        window.location.assign(buildSilentOAuthUrl(redirectUri));
+      }
+    }
+
+    if (redirecting) return;
+    return () => window.removeEventListener(OPENID_READY_EVENT, onReady);
   }, [autoRedirect, openId]);
 
   return openId;

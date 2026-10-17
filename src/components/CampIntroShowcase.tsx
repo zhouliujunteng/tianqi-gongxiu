@@ -119,11 +119,20 @@ function Blob({
   className?: string;
   style?: CSSProperties;
 }) {
+  /**
+   * 同样是柔光装饰：不用 `filter: blur()`（微信内滚动时太吃显存，
+   * 会导致 webview 被回收后整页重载），改用径向渐变。
+   */
+  const color =
+    typeof style?.background === 'string' ? style.background : '#5D7052';
   return (
     <div
       aria-hidden
-      className={`pointer-events-none absolute blur-3xl opacity-25 ${className ?? ''}`}
-      style={style}
+      className={`pointer-events-none absolute opacity-25 ${className ?? ''}`}
+      style={{
+        ...style,
+        background: `radial-gradient(circle at 50% 50%, ${color} 0%, ${color} 40%, ${color}00 72%)`,
+      }}
     />
   );
 }

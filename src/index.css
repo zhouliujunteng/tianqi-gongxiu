@@ -21,12 +21,16 @@
   }
 }
 
+/*
+ * 纸质纹理：去掉 `mix-blend-mode: multiply`。
+ * 全屏固定层 + 混合模式会让整页在滚动时被迫整体重绘（微信内置浏览器尤其明显，
+ * 严重时 webview 被回收、页面自动重载回到顶部），改成普通低透明度叠加。
+ */
 .texture-overlay {
   pointer-events: none;
   position: fixed;
   inset: 0;
   z-index: 0;
-  opacity: 0.035;
-  mix-blend-mode: multiply;
+  opacity: 0.05;
   background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
