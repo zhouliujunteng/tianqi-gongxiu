@@ -1275,11 +1275,16 @@ export function Lead2026CampEnrollPage({
     );
   }
 
+  // 只在首次查询（还没有任何结果）时显示整页加载。
+  // 下面每 4 秒会轮询一次支付状态，若轮询时也整页替换成「正在查询…」，
+  // 页面高度瞬间塌掉、滚动位置被重置——微信里表现为「一滑就刷新回到顶部」，
+  // 支付卡片也会被反复卸载导致付不了款。
   if (
     !isCampAdmin &&
     !isCampWechatAdmin &&
     !isCampCheckinAdmin &&
     eligibilityLoading &&
+    !eligibilityData &&
     !campPayUnlocked
   ) {
     return (

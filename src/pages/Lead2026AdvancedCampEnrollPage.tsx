@@ -1475,7 +1475,8 @@ export function Lead2026AdvancedCampEnrollPage({
                       </button>
                     </div>
                   ) : null}
-                  {eligibilityLoading ? (
+                  {/* 仅首次查询时提示；4 秒一次的后台轮询不改动布局，避免页面跳动 */}
+                  {eligibilityLoading && !eligibilityData ? (
                     <p className="mb-3 text-sm text-muted-foreground">正在确认支付状态…</p>
                   ) : null}
                   {showWechatPayCard ? (
