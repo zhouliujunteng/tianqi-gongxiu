@@ -34,9 +34,34 @@ const ADMIN_SELF_PAID_ORDERS = `
       ud_tianjiazhuangtai_a1779b
       ud_dingdanjine_a50087
       ud_dingdanjine0028zhengshu0029_1070ec
+      ud_gongxiuyingdaqiajilu_fd4f79(order_by: [{ created_at: desc }], limit: 1) {
+        id
+        created_at
+        ud_daqiatupian_764935 {
+          id
+          url(acl: PUBLIC_READ)
+        }
+      }
+      ud_gongxiuyingdaqiajilu_fd4f79_aggregate {
+        aggregate {
+          count
+        }
+      }
     }
   }
 `;
+
+/** 共修营打卡记录（订单表上的反向关系） */
+type CheckinFields = {
+  ud_gongxiuyingdaqiajilu_fd4f79?: Array<{
+    id: string | number;
+    created_at: string | null;
+    ud_daqiatupian_764935?: { id: string | number; url: string | null } | null;
+  }> | null;
+  ud_gongxiuyingdaqiajilu_fd4f79_aggregate?: {
+    aggregate?: { count?: number | null } | null;
+  } | null;
+};
 
 export type AdminSelfPaidRow = {
   id: string | number;
@@ -52,7 +77,7 @@ export type AdminSelfPaidRow = {
     ud_tianjiazhuangtai_a1779b: string | null;
     ud_dingdanjine_a50087: string | null;
     ud_dingdanjine0028zhengshu0029_1070ec: number | null;
-  };
+  } & CheckinFields;
 };
 
 type RawRow = {
@@ -66,7 +91,7 @@ type RawRow = {
   ud_tianjiazhuangtai_a1779b: string | null;
   ud_dingdanjine_a50087: string | null;
   ud_dingdanjine0028zhengshu0029_1070ec: number | null;
-};
+} & CheckinFields;
 
 function toAdminRow(r: RawRow): AdminSelfPaidRow {
   return {
@@ -84,6 +109,9 @@ function toAdminRow(r: RawRow): AdminSelfPaidRow {
       ud_dingdanjine_a50087: r.ud_dingdanjine_a50087 ?? null,
       ud_dingdanjine0028zhengshu0029_1070ec:
         r.ud_dingdanjine0028zhengshu0029_1070ec ?? null,
+      ud_gongxiuyingdaqiajilu_fd4f79: r.ud_gongxiuyingdaqiajilu_fd4f79 ?? [],
+      ud_gongxiuyingdaqiajilu_fd4f79_aggregate:
+        r.ud_gongxiuyingdaqiajilu_fd4f79_aggregate ?? null,
     },
   };
 }

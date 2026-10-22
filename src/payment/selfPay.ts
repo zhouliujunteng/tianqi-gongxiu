@@ -205,3 +205,70 @@ export async function fetchSelfPayPaidOrders(input: {
   );
   return data.ud_dingdan_b6a218 ?? [];
 }
+
+const SELF_PAY_ORDER_CHECKINS = `
+  query SelfPayOrderCheckins(
+    $orderId: bigint!
+    $todayStart: timestamptz!
+    $todayEnd: timestamptz!
+  ) {
+    today: ud_gongxiuyingdaqiajilu_5ba46e(
+      where: {
+        _and: [
+          { ud_baomingzhifudingdan_id_36dd84: { _eq: $orderId } }
+          { created_at: { _gte: $todayStart, _lt: $todayEnd } }
+        ]
+      }
+      order_by: [{ created_at: desc }]
+      limit: 1
+    ) {
+      id
+      created_at
+      ud_daqiatupian_764935 {
+        id
+        url(acl: PUBLIC_READ)
+      }
+    }
+    total: ud_gongxiuyingdaqiajilu_5ba46e_aggregate(
+      where: { ud_baomingzhifudingdan_id_36dd84: { _eq: $orderId } }
+    ) {
+      aggregate {
+        count
+      }
+    }
+  }
+`;
+
+export type SelfPayOrderCheckins = {
+  todayCheckin: {
+    id: string | number;
+    created_at: string | null;
+    ud_daqiatupian_764935?: { id: string | number; url: string | null } | null;
+  } | null;
+  count: number;
+};
+
+/**
+ * 匿名通道查询某张订单的打卡情况（今日最近一条 + 累计次数）。
+ *
+ * 自建支付通道的订单没有 fz_payment_record，无法沿用「支付记录 → 订单 → 打卡」的查询路径，
+ * 因此直接按订单 ID 查打卡表。
+ */
+export async function fetchSelfPayOrderCheckins(input: {
+  orderId: string;
+  todayStart: string;
+  todayEnd: string;
+}): Promise<SelfPayOrderCheckins> {
+  const data = await anonGraphqlRequest<{
+    today: SelfPayOrderCheckins['todayCheckin'][];
+    total: { aggregate?: { count?: number | null } | null } | null;
+  }>(SELF_PAY_ORDER_CHECKINS, {
+    orderId: Number(input.orderId),
+    todayStart: input.todayStart,
+    todayEnd: input.todayEnd,
+  });
+  return {
+    todayCheckin: data.today?.[0] ?? null,
+    count: data.total?.aggregate?.count ?? 0,
+  };
+}

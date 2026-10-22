@@ -43,7 +43,13 @@ export function useSelfPayPaid(input: {
   orderType?: string | null;
   /** 未确认已付时的轮询间隔（毫秒），默认 4000 */
   pollMs?: number;
-}): { paid: boolean; loading: boolean; refetch: () => void } {
+}): {
+  paid: boolean;
+  /** 本期已付订单的订单表 ID（打卡要挂在这张订单上） */
+  paidOrderId: string | null;
+  loading: boolean;
+  refetch: () => void;
+} {
   const { enabled, userLibraryId, publicAccountId, aliases, orderType, pollMs = 4000 } =
     input;
 
@@ -83,14 +89,15 @@ export function useSelfPayPaid(input: {
     };
   }, [active, publicAccountId, tick, userLibraryId]);
 
-  const paid = useMemo(() => {
-    if (!rows?.length) return false;
-    return rows.some(
-      (row) =>
-        String(row.ud_dingdanleixing_3ade69 ?? '').trim() === WENJUAN_ORDER_STATUS_PAID &&
-        matchesAlias(row, aliases, orderType)
+  const paidOrderId = useMemo(() => {
+    const row = rows?.find(
+      (r) =>
+        String(r.ud_dingdanleixing_3ade69 ?? '').trim() === WENJUAN_ORDER_STATUS_PAID &&
+        matchesAlias(r, aliases, orderType)
     );
+    return row ? String(row.id) : null;
   }, [aliases, orderType, rows]);
+  const paid = paidOrderId !== null;
 
   useEffect(() => {
     if (!active || paid) return;
@@ -98,5 +105,5 @@ export function useSelfPayPaid(input: {
     return () => window.clearInterval(timer);
   }, [active, paid, pollMs]);
 
-  return { paid, loading: active && loading && rows === null, refetch };
+  return { paid, paidOrderId, loading: active && loading && rows === null, refetch };
 }

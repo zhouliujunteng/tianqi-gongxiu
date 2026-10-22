@@ -74,7 +74,11 @@ import type {
   GetImageUploadUrlData,
 } from '../types/camp2026';
 import { friendlyRequestErrorMessage } from '../utils/friendlyRequestError';
-import { extractWechatOpenId } from '../payment/selfPay';
+import {
+  extractWechatOpenId,
+  fetchSelfPayOrderCheckins,
+  type SelfPayOrderCheckins,
+} from '../payment/selfPay';
 import {
   fetchAdminSelfPaidOrders,
   useAdminSelfPaidOrders,
@@ -825,7 +829,7 @@ export function Lead2026CampEnrollPage({
   }, [campPhase, miniProgramUserId, miniRow?.id]);
 
   /** 自建支付通道：pay-service 回调把订单表状态置为「已支付」，此处补一路已付判定 */
-  const { paid: selfPayPaid } = useSelfPayPaid({
+  const { paid: selfPayPaid, paidOrderId: selfPayPaidOrderId } = useSelfPayPaid({
     enabled: true,
     userLibraryId: miniRow?.id ?? null,
     publicAccountId:
@@ -905,13 +909,55 @@ export function Lead2026CampEnrollPage({
       ),
     [enrolledOrder?.ud_gongxiuyingweixin_62acc6, enrolledOrder?.ud_tianjiazhuangtai_a1779b]
   );
-  const enrolledOrderId =
+  const zionEnrolledOrderId =
     enrolledOrder?.id !== null && enrolledOrder?.id !== undefined
       ? String(enrolledOrder.id)
       : null;
-  const todayCheckin = enrolledOrder?.ud_gongxiuyingdaqiajilu_fd4f79?.[0] ?? null;
-  const checkinCount =
-    enrolledOrder?.ud_gongxiuyingdaqiajilu_fd4f79_aggregate?.aggregate?.count ?? 0;
+  /**
+   * 自建支付通道的订单没有 fz_payment_record，上面的查询读不到；
+   * 此时用订单表里本期已付的订单作为打卡关联订单，打卡情况按订单 ID 走匿名通道查询。
+   */
+  const usingSelfPayOrder = !zionEnrolledOrderId && Boolean(selfPayPaidOrderId);
+  const enrolledOrderId = zionEnrolledOrderId ?? selfPayPaidOrderId;
+  const [selfPayCheckins, setSelfPayCheckins] = useState<SelfPayOrderCheckins | null>(null);
+  const [selfPayCheckinsError, setSelfPayCheckinsError] = useState<unknown>(null);
+  const refetchSelfPayCheckins = useCallback(async () => {
+    if (!usingSelfPayOrder || !selfPayPaidOrderId) {
+      setSelfPayCheckins(null);
+      setSelfPayCheckinsError(null);
+      return null;
+    }
+    try {
+      const result = await fetchSelfPayOrderCheckins({
+        orderId: selfPayPaidOrderId,
+        todayStart: todayRange.start,
+        todayEnd: todayRange.end,
+      });
+      setSelfPayCheckins(result);
+      setSelfPayCheckinsError(null);
+      return result;
+    } catch (error) {
+      setSelfPayCheckinsError(error);
+      return null;
+    }
+  }, [selfPayPaidOrderId, todayRange.end, todayRange.start, usingSelfPayOrder]);
+  useEffect(() => {
+    void refetchSelfPayCheckins();
+  }, [refetchSelfPayCheckins]);
+  const refreshCheckinStatus = useCallback(async () => {
+    if (usingSelfPayOrder) {
+      await refetchSelfPayCheckins();
+      return;
+    }
+    await refetchCampEnrollment();
+  }, [refetchCampEnrollment, refetchSelfPayCheckins, usingSelfPayOrder]);
+  const todayCheckin = usingSelfPayOrder
+    ? selfPayCheckins?.todayCheckin ?? null
+    : enrolledOrder?.ud_gongxiuyingdaqiajilu_fd4f79?.[0] ?? null;
+  const checkinCount = usingSelfPayOrder
+    ? selfPayCheckins?.count ?? 0
+    : enrolledOrder?.ud_gongxiuyingdaqiajilu_fd4f79_aggregate?.aggregate?.count ?? 0;
+  const checkinReadError = usingSelfPayOrder ? selfPayCheckinsError : campEnrollmentError;
   const alreadyCheckedInToday = Boolean(todayCheckin);
 
   useEffect(() => {
@@ -1049,12 +1095,18 @@ export function Lead2026CampEnrollPage({
 
     setCheckinSubmitting(true);
     try {
-      const latest = await refetchCampEnrollment();
-      const latestPayment = latest.data?.fz_payment_record?.find(
-        (row) => row.order?.id !== null && row.order?.id !== undefined
-      );
-      const latestTodayCheckin =
-        latestPayment?.order?.ud_gongxiuyingdaqiajilu_fd4f79?.[0] ?? null;
+      let latestTodayCheckin: unknown = null;
+      if (usingSelfPayOrder) {
+        const latest = await refetchSelfPayCheckins();
+        latestTodayCheckin = latest?.todayCheckin ?? null;
+      } else {
+        const latest = await refetchCampEnrollment();
+        const latestPayment = latest.data?.fz_payment_record?.find(
+          (row) => row.order?.id !== null && row.order?.id !== undefined
+        );
+        latestTodayCheckin =
+          latestPayment?.order?.ud_gongxiuyingdaqiajilu_fd4f79?.[0] ?? null;
+      }
       if (latestTodayCheckin) {
         setCheckinError('今天已经打卡成功，无需重复提交。');
         return;
@@ -1089,7 +1141,7 @@ export function Lead2026CampEnrollPage({
 
       setCheckinFile(null);
       setCheckinSuccess('今日打卡成功，已记录到你的共修营打卡表。');
-      await refetchCampEnrollment();
+      await refreshCheckinStatus();
     } catch (error) {
       setCheckinError(friendlyRequestErrorMessage(error));
     } finally {
@@ -1102,6 +1154,9 @@ export function Lead2026CampEnrollPage({
     getImageUploadUrl,
     insertCampCheckin,
     refetchCampEnrollment,
+    refetchSelfPayCheckins,
+    refreshCheckinStatus,
+    usingSelfPayOrder,
   ]);
 
   useEffect(() => {
@@ -1805,9 +1860,9 @@ export function Lead2026CampEnrollPage({
               </div>
             </div>
 
-            {campEnrollmentError ? (
+            {checkinReadError ? (
               <p className="mt-4 text-sm text-destructive" role="alert">
-                打卡记录读取失败：{friendlyRequestErrorMessage(campEnrollmentError)}
+                打卡记录读取失败：{friendlyRequestErrorMessage(checkinReadError)}
               </p>
             ) : null}
 
@@ -1876,7 +1931,7 @@ export function Lead2026CampEnrollPage({
                   <button
                     type="button"
                     className="min-h-12 rounded-full border border-border px-6 py-3 text-sm text-muted-foreground transition hover:bg-muted/50"
-                    onClick={() => void refetchCampEnrollment()}
+                    onClick={() => void refreshCheckinStatus()}
                   >
                     刷新打卡状态
                   </button>
