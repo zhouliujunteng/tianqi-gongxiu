@@ -901,6 +901,31 @@ export function Lead2026CampEnrollPage({
   }, [campEnrollmentData, campPayDescriptionAliases]);
 
   const enrolledOrder = enrolledPayment?.order ?? null;
+
+  /**
+   * 报名时填写的 ID：优先用本机缓存 / 当前输入；换设备或缓存被清掉时，
+   * 从已付订单反查（订单上存的是用户库行 ID，需再换成用户小程序ID；公众号学员直接用公众号ID）。
+   */
+  const enrolledUserLibraryId = String(
+    enrolledOrder?.ud_yonghuxinxi_yonghuku_55773d ?? ''
+  ).trim();
+  const { data: enrolledUserLibraryData } = useQuery<CampAdminUserLibraryIdsData>(
+    CAMP_ADMIN_USER_LIBRARY_IDS,
+    {
+      variables: { userLibraryIds: [enrolledUserLibraryId] },
+      skip:
+        !/^\d+$/.test(enrolledUserLibraryId) ||
+        Boolean(displayCampContext?.miniProgramUserId),
+      fetchPolicy: 'network-only',
+    }
+  );
+  const enrolledCampUserId =
+    displayCampContext?.miniProgramUserId?.trim() ||
+    String(
+      enrolledUserLibraryData?.ud_yonghuxinxi_89e7ab?.[0]?.ud_id002fchaxun_fb7c4b ?? ''
+    ).trim() ||
+    String(enrolledOrder?.ud_gongzhonghaoid_665d9b ?? '').trim() ||
+    null;
   const enrolledWechatContact = useMemo(
     () =>
       parseCampWechatContactFields(
@@ -1754,21 +1779,21 @@ export function Lead2026CampEnrollPage({
             ✓
           </p>
           <h2 className="mt-4 font-display text-3xl text-foreground">报名成功</h2>
+          {enrolledCampUserId ? (
+            <div className="mt-4 inline-flex flex-wrap items-baseline gap-x-3 gap-y-1 rounded-2xl border border-primary/30 bg-primary/5 px-4 py-3">
+              <span className="text-sm text-muted-foreground">你报名时填写的ID</span>
+              <span className="font-mono text-2xl font-semibold tracking-wider text-primary">
+                {enrolledCampUserId}
+              </span>
+            </div>
+          ) : null}
           {displayCampContext ? (
-            <>
-              <p className="mt-3 text-muted-foreground">
-                本次支付金额：
-                <span className="font-semibold text-foreground">
-                  ¥{displayCampContext.amountYuan}
-                </span>
-              </p>
-              <p className="mt-2 text-muted-foreground">
-                你的用户小程序ID：
-                <span className="font-mono text-foreground">
-                  {displayCampContext.miniProgramUserId}
-                </span>
-              </p>
-            </>
+            <p className="mt-3 text-muted-foreground">
+              本次支付金额：
+              <span className="font-semibold text-foreground">
+                ¥{displayCampContext.amountYuan}
+              </span>
+            </p>
           ) : (
             <p className="mt-3 text-muted-foreground">
               当前已识别到本期报名付款成功。请耐心等待进群小助手邀请进群。

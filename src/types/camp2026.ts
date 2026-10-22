@@ -61,6 +61,7 @@ export interface CampEnrollmentStatusData {
       id: string | number;
       ud_dingdanleixing_3fb8b8: string | null;
       ud_dingdanbeizhu_439d3a?: string | null;
+      ud_yonghuxinxi_yonghuku_55773d?: string | number | null;
       ud_gongzhonghaoid_665d9b?: string | null;
       ud_gongxiuyingweixin_62acc6?: string | null;
       ud_tianjiazhuangtai_a1779b?: string | null;

@@ -128,6 +128,7 @@ export const MY_CAMP_ENROLLMENT_STATUS = gql`
         id
         ud_dingdanleixing_3fb8b8
         ud_dingdanbeizhu_439d3a
+        ud_yonghuxinxi_yonghuku_55773d
         ud_gongzhonghaoid_665d9b
         ud_gongxiuyingweixin_62acc6
         ud_tianjiazhuangtai_a1779b
