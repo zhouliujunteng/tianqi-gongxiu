@@ -62,10 +62,14 @@ export function useSelfPayPaid(input: {
   const active = enabled && isSelfPayEnabled() && hasIdentifier;
 
   const [rows, setRows] = useState<SelfPayOrderRow[] | null>(null);
-  const [loading, setLoading] = useState(false);
   const [tick, setTick] = useState(0);
 
   const refetch = useCallback(() => setTick((t) => t + 1), []);
+
+  // 换了 ID 就丢掉上一个 ID 的查询结果，避免拿旧结果误判「未付」或「已付」
+  useEffect(() => {
+    setRows(null);
+  }, [publicAccountId, userLibraryId]);
 
   useEffect(() => {
     if (!active) {
@@ -73,16 +77,12 @@ export function useSelfPayPaid(input: {
       return;
     }
     let cancelled = false;
-    setLoading(true);
     fetchSelfPayPaidOrders({ userLibraryId, publicAccountId })
       .then((list) => {
         if (!cancelled) setRows(list);
       })
       .catch(() => {
         if (!cancelled) setRows([]);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
       });
     return () => {
       cancelled = true;
@@ -105,5 +105,5 @@ export function useSelfPayPaid(input: {
     return () => window.clearInterval(timer);
   }, [active, paid, pollMs]);
 
-  return { paid, paidOrderId, loading: active && loading && rows === null, refetch };
+  return { paid, paidOrderId, loading: active && rows === null, refetch };
 }

@@ -339,9 +339,28 @@ type CampContext = {
   identity: string | null;
 };
 
-function readCampContext(): CampContext | null {
+/**
+ * 报名上下文同时写 sessionStorage 与 localStorage：
+ * 微信关闭网页后 sessionStorage 会被清空，已报名家长再次打开链接时要靠 localStorage 恢复报名 ID，
+ * 否则读不到自建通道的已付订单，报名截止后就会被挡在「本期报名已结束」页面、无法打卡。
+ */
+function readCampContextRaw(): string | null {
   try {
     const raw = sessionStorage.getItem(CAMP_CONTEXT_STORAGE_KEY);
+    if (raw) return raw;
+  } catch {
+    /* ignore */
+  }
+  try {
+    return localStorage.getItem(CAMP_CONTEXT_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function readCampContext(): CampContext | null {
+  try {
+    const raw = readCampContextRaw();
     if (!raw) return null;
     const parsed = JSON.parse(raw) as unknown;
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
@@ -380,11 +399,21 @@ function writeCampContext(context: CampContext): void {
   } catch {
     /* ignore */
   }
+  try {
+    localStorage.setItem(CAMP_CONTEXT_STORAGE_KEY, JSON.stringify(context));
+  } catch {
+    /* ignore */
+  }
 }
 
 function clearCampContext(): void {
   try {
     sessionStorage.removeItem(CAMP_CONTEXT_STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
+  try {
+    localStorage.removeItem(CAMP_CONTEXT_STORAGE_KEY);
   } catch {
     /* ignore */
   }
@@ -829,7 +858,11 @@ export function Lead2026CampEnrollPage({
   }, [campPhase, miniProgramUserId, miniRow?.id]);
 
   /** 自建支付通道：pay-service 回调把订单表状态置为「已支付」，此处补一路已付判定 */
-  const { paid: selfPayPaid, paidOrderId: selfPayPaidOrderId } = useSelfPayPaid({
+  const {
+    paid: selfPayPaid,
+    paidOrderId: selfPayPaidOrderId,
+    loading: selfPayLoading,
+  } = useSelfPayPaid({
     enabled: true,
     userLibraryId: miniRow?.id ?? null,
     publicAccountId:
@@ -1978,6 +2011,11 @@ export function Lead2026CampEnrollPage({
     !isCampCheckinAdmin &&
     !isCampWechatAdmin
   ) {
+    // 报名已截止，但已报名家长仍要进来打卡：按报名时填写的 ID 查本期已付订单，查到即进入打卡页。
+    const enrolledLookupPending =
+      miniProgramIdValid && (miniUserLoading || (matchedForCampPricing && selfPayLoading));
+    const enrolledLookupMissed =
+      miniProgramIdValid && !miniUserLoading && !selfPayLoading && !miniUserError;
     return (
       <div className="relative z-10 mx-auto max-w-lg px-4 py-16 text-center">
         <div className="rounded-[2rem] border border-border bg-card p-10 shadow-organic">
@@ -1993,6 +2031,41 @@ export function Lead2026CampEnrollPage({
           <p className="mx-auto mt-4 max-w-md text-sm leading-relaxed text-foreground/85 md:text-base">
             {campDisplayName}报名已于 {campSchedule.deadline} 截止，请关注后续新一期开放通知。
           </p>
+
+          <div className="mt-8 rounded-2xl border border-primary/25 bg-primary/5 p-4 text-left">
+            <p className="text-sm font-semibold text-primary">已报名学员请在此进入打卡</p>
+            <label className="mt-3 block text-sm text-foreground" htmlFor="camp-closed-enrolled-id">
+              报名时填写的用户ID（5位或6位数字）
+            </label>
+            <input
+              id="camp-closed-enrolled-id"
+              className={`${inputClass} mt-2`}
+              value={miniProgramUserId}
+              onChange={(e) => setMiniProgramUserId(e.target.value)}
+              placeholder="例如 12345 或 123456"
+              inputMode="numeric"
+              autoComplete="off"
+            />
+            {miniProgramUserId.trim().length > 0 && !miniProgramIdValid ? (
+              <p className="mt-2 text-sm text-destructive">请输入 5 位或 6 位纯数字的用户ID。</p>
+            ) : enrolledLookupPending ? (
+              <p className="mt-2 text-sm text-muted-foreground">正在查询报名记录…</p>
+            ) : miniUserError ? (
+              <p className="mt-2 text-sm text-destructive" role="alert">
+                查询失败：{friendlyRequestErrorMessage(miniUserError)}
+              </p>
+            ) : enrolledLookupMissed ? (
+              <p className="mt-2 text-sm text-destructive" role="alert">
+                {matchedForCampPricing
+                  ? '未查到该ID本期的已付报名订单，请确认是否为报名时填写的ID。'
+                  : '未找到该ID，请确认是否为报名时填写的ID。'}
+              </p>
+            ) : (
+              <p className="mt-2 text-xs text-muted-foreground">
+                查到本期已付报名后会自动进入打卡页面。
+              </p>
+            )}
+          </div>
         </div>
       </div>
     );
