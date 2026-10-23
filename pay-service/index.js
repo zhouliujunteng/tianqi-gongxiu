@@ -97,6 +97,9 @@ async function wechatRequest(method, urlPath, bodyObj) {
       Authorization: buildAuthorization(method, urlPath, body),
       'Content-Type': 'application/json',
       Accept: 'application/json',
+      // Node 自带 fetch 默认发 `Accept-Language: *`，微信 /v3/certificates 会直接 406 拒绝，
+      // 导致回调验签拿不到平台证书、订单永远停在「未支付」。
+      'Accept-Language': 'zh-CN',
       'User-Agent': 'tianqi-pay-service/1.0',
     },
     body: method === 'GET' ? undefined : body,
@@ -401,7 +404,16 @@ app.post('/api/pay/jsapi', async (req, res) => {
 app.post('/api/pay/notify', express.text({ type: '*/*' }), async (req, res) => {
   const rawBody = typeof req.body === 'string' ? req.body : '';
   try {
-    const ok = await verifyNotifySignature(req.headers, rawBody);
+    let ok = false;
+    // 验签依赖平台证书；证书拉取失败时不能直接丢回调，改为解密后向微信主动查单确认（见下）
+    let mustConfirmByQuery = false;
+    try {
+      ok = await verifyNotifySignature(req.headers, rawBody);
+    } catch (e) {
+      console.error('[pay-service] 回调验签异常，改为主动查单确认：', e?.message ?? e);
+      ok = true;
+      mustConfirmByQuery = true;
+    }
     if (!ok) {
       console.warn('[pay-service] 回调验签失败');
       res.status(401).json({ code: 'FAIL', message: '签名验证失败' });
@@ -421,6 +433,19 @@ app.post('/api/pay/notify', express.text({ type: '*/*' }), async (req, res) => {
     );
     const data = JSON.parse(plain);
     const orderId = data?.attach || orderIdFromTradeNo(data?.out_trade_no);
+
+    if (data?.trade_state === 'SUCCESS' && orderId && mustConfirmByQuery) {
+      const q = await wechatRequest(
+        'GET',
+        `/v3/pay/transactions/out-trade-no/${encodeURIComponent(data.out_trade_no)}?mchid=${MCH_ID}`,
+        undefined
+      );
+      if (q.status !== 200 || q.json?.trade_state !== 'SUCCESS') {
+        console.warn(`[pay-service] 未验签回调查单未确认支付：${data.out_trade_no}`);
+        res.status(500).json({ code: 'FAIL', message: '支付状态未确认' });
+        return;
+      }
+    }
 
     if (data?.trade_state === 'SUCCESS' && orderId) {
       if (!processedTradeNo.has(data.out_trade_no)) {

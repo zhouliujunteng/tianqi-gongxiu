@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  confirmSelfPayByOrderId,
   fetchSelfPayPaidOrders,
   isSelfPayEnabled,
   type SelfPayOrderRow,
@@ -99,11 +100,43 @@ export function useSelfPayPaid(input: {
   }, [aliases, orderType, rows]);
   const paid = paidOrderId !== null;
 
+  /**
+   * 支付回调丢失时订单会停在「未支付」：对本期未支付订单向支付服务查一次单，
+   * 微信确认已付会顺带写回订单表，随后重新拉取即可放行。每张订单只查一次，避免轮询打满微信接口。
+   */
+  const confirmedOrderIds = useRef(new Set<string>());
+  const [confirming, setConfirming] = useState(false);
+  useEffect(() => {
+    if (!active || paid || !rows?.length) return;
+    const pending = rows
+      .filter(
+        (r) =>
+          String(r.ud_dingdanleixing_3ade69 ?? '').trim() !== WENJUAN_ORDER_STATUS_PAID &&
+          matchesAlias(r, aliases, orderType)
+      )
+      .map((r) => String(r.id))
+      .filter((id) => !confirmedOrderIds.current.has(id));
+    if (!pending.length) return;
+    pending.forEach((id) => confirmedOrderIds.current.add(id));
+    setConfirming(true);
+    void Promise.all(pending.map((id) => confirmSelfPayByOrderId(id))).then((results) => {
+      // 查到已付就立即重拉（不等下一次轮询），重拉结果回来前保持「查询中」
+      if (results.some(Boolean)) {
+        fetchSelfPayPaidOrders({ userLibraryId, publicAccountId })
+          .then(setRows)
+          .catch(() => undefined)
+          .finally(() => setConfirming(false));
+      } else {
+        setConfirming(false);
+      }
+    });
+  }, [active, aliases, orderType, paid, publicAccountId, rows, userLibraryId]);
+
   useEffect(() => {
     if (!active || paid) return;
     const timer = window.setInterval(() => setTick((t) => t + 1), pollMs);
     return () => window.clearInterval(timer);
   }, [active, paid, pollMs]);
 
-  return { paid, paidOrderId, loading: active && rows === null, refetch };
+  return { paid, paidOrderId, loading: active && (rows === null || confirming), refetch };
 }

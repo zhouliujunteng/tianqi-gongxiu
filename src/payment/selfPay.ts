@@ -10,7 +10,6 @@
  */
 
 import { anonGraphqlRequest } from '../utils/anonGraphql';
-import { WENJUAN_ORDER_STATUS_PAID } from '../constants/lead2026';
 
 export type SelfPayResult =
   | {
@@ -155,20 +154,32 @@ export async function fetchSelfPayStatus(outTradeNo: string): Promise<{
   }
 }
 
+/**
+ * 按订单 ID 向支付服务查单；微信确认已付时支付服务会顺带把订单表改成「已支付」。
+ * 用于补救支付回调丢失、订单停在「未支付」的情况。
+ */
+export async function confirmSelfPayByOrderId(orderId: string): Promise<boolean> {
+  const base = serviceBaseUrl();
+  if (!base || !/^\d+$/.test(orderId)) return false;
+  try {
+    const res = await fetch(`${base}/api/pay/status?orderId=${encodeURIComponent(orderId)}`);
+    const json = (await res.json()) as { paid?: boolean };
+    return Boolean(json.paid);
+  } catch {
+    return false;
+  }
+}
+
 const SELF_PAY_PAID_ORDERS = `
   query SelfPayPaidOrders($userLibraryId: bigint!, $publicAccountId: String!) {
     ud_dingdan_b6a218(
       where: {
-        _and: [
-          { ud_dingdanleixing_3ade69: { _eq: "${WENJUAN_ORDER_STATUS_PAID}" } }
-          {
-            _or: [
-              { ud_yonghuxinxi_yonghuku_55773d: { _eq: $userLibraryId } }
-              { ud_gongzhonghaoid_665d9b: { _eq: $publicAccountId } }
-            ]
-          }
+        _or: [
+          { ud_yonghuxinxi_yonghuku_55773d: { _eq: $userLibraryId } }
+          { ud_gongzhonghaoid_665d9b: { _eq: $publicAccountId } }
         ]
       }
+      order_by: [{ id: desc }]
       limit: 50
     ) {
       id
@@ -187,7 +198,7 @@ export type SelfPayOrderRow = {
 };
 
 /**
- * 匿名通道查询「自建支付已付」订单。
+ * 匿名通道查询该用户的订单（含未支付，调用方按「订单状态」筛已付；未支付的可再向支付服务查单补救）。
  *
  * 订单表对登录用户有行级过滤（登录态反而查不到），故与报名数据一样走匿名通道。
  */
