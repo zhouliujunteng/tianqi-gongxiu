@@ -9,7 +9,7 @@ export const CAMP_CLASS_PHOTO_DOC_TYPES = [
   '上课图片4',
 ] as const;
 
-export type CampPhase = '1' | '2' | '3' | '4' | '5' | '6' | '8' | '10';
+export type CampPhase = '1' | '2' | '3' | '4' | '5' | '6' | '8' | '10' | '11';
 
 /**
  * 全部合法期次。注意：内部期号跳过 '7' 与 '9'，
@@ -18,6 +18,7 @@ export type CampPhase = '1' | '2' | '3' | '4' | '5' | '6' | '8' | '10';
  * - 内部 phase '6'：2026 年 8 月营期，对外「第5期」
  * - 内部 phase '8'：2026 年 9 月营期，对外「第6期」
  * - 内部 phase '10'：2026 年 10 月营期，对外「第7期」
+ * - 内部 phase '11'：2026 年 11 月营期，对外「第8期」
  */
 const CAMP_KNOWN_PHASE_LIST: readonly CampPhase[] = [
   '1',
@@ -28,10 +29,11 @@ const CAMP_KNOWN_PHASE_LIST: readonly CampPhase[] = [
   '6',
   '8',
   '10',
+  '11',
 ];
 
 /** 当前最新一期（无 phase 参数时的默认展示期次） */
-export const CAMP_LATEST_PHASE: CampPhase = '10';
+export const CAMP_LATEST_PHASE: CampPhase = '11';
 
 export function isKnownCampPhase(value: string): value is CampPhase {
   return CAMP_KNOWN_PHASE_LIST.includes(value as CampPhase);
@@ -52,6 +54,7 @@ const CAMP_ENROLLMENT_DEADLINE_AT: Record<CampPhase, string> = {
   '6': '2026-07-31T18:00:00+08:00',
   '8': '2026-09-06T18:00:00+08:00',
   '10': '2026-10-21T18:00:00+08:00',
+  '11': '2026-11-19T18:00:00+08:00',
 };
 
 const CAMP_ENROLLMENT_DEADLINE_BYPASS_ACCOUNT_IDS = new Set([
@@ -87,6 +90,7 @@ export function getCampPhaseLabel(phase: CampPhase): string {
  *   因此该期订单标识独立为「第8期」。
  */
 export function getCampDisplayPhaseLabel(phase: CampPhase): string {
+  if (phase === '11') return '第8期';
   if (phase === '10') return '第7期';
   if (phase === '8') return '第6期';
   if (phase === '6') return '第5期';
@@ -98,7 +102,7 @@ export function getCampDisplayPhaseLabel(phase: CampPhase): string {
  * 第 06 次开营（内部 phase '6'）起启用参与费用规则，后续期次延续。
  */
 export function isCampParticipationFeeNonRefundable(phase: CampPhase): boolean {
-  return phase === '6' || phase === '8' || phase === '10';
+  return phase === '6' || phase === '8' || phase === '10' || phase === '11';
 }
 
 /**
@@ -114,6 +118,7 @@ const CAMP_PARTICIPATION_FEE_YUAN: Record<CampPhase, number> = {
   '6': 200,
   '8': 200,
   '10': 100,
+  '11': 100,
 };
 
 export function getCampParticipationFeeYuan(phase: CampPhase): number {
@@ -132,6 +137,7 @@ const CAMP_DURATION_DAYS: Record<CampPhase, number> = {
   '6': 14,
   '8': 14,
   '10': 7,
+  '11': 7,
 };
 
 export function getCampDurationDays(phase: CampPhase): number {
@@ -217,6 +223,12 @@ export function isCampOrderRemarkForPhase(
 
 /** 营期展示文案（与群内最终通知不一致时以群内为准） */
 export function getCampSchedule(phase: CampPhase): CampSchedule {
+  if (phase === '11') {
+    return {
+      dateRange: '11 月 14 日至 11 月 20 日',
+      deadline: '11 月 19 日 18:00',
+    };
+  }
   if (phase === '10') {
     return {
       dateRange: '10 月 22 日至 10 月 28 日',
