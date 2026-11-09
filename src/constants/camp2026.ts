@@ -54,7 +54,7 @@ const CAMP_ENROLLMENT_DEADLINE_AT: Record<CampPhase, string> = {
   '6': '2026-07-31T18:00:00+08:00',
   '8': '2026-09-06T18:00:00+08:00',
   '10': '2026-10-21T18:00:00+08:00',
-  '11': '2026-11-19T18:00:00+08:00',
+  '11': '2026-11-13T18:00:00+08:00',
 };
 
 const CAMP_ENROLLMENT_DEADLINE_BYPASS_ACCOUNT_IDS = new Set([
@@ -226,7 +226,7 @@ export function getCampSchedule(phase: CampPhase): CampSchedule {
   if (phase === '11') {
     return {
       dateRange: '11 月 14 日至 11 月 20 日',
-      deadline: '11 月 19 日 18:00',
+      deadline: '11 月 13 日 18:00',
     };
   }
   if (phase === '10') {
